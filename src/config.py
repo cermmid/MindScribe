@@ -12,7 +12,18 @@ DB_PATH = DATA_DIR / "mindscribe.db"
 
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+def _from_secrets(key: str) -> str | None:
+    """Fallback to Streamlit secrets when env var is not set (used on Streamlit Cloud)."""
+    try:
+        import streamlit as st
+
+        return st.secrets.get(key)
+    except Exception:
+        return None
+
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or _from_secrets("GEMINI_API_KEY") or ""
+GEMINI_MODEL = os.getenv("GEMINI_MODEL") or _from_secrets("GEMINI_MODEL") or "gemini-2.5-flash"
 
 FEW_SHOT_LIMIT = 3

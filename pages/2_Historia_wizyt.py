@@ -3,9 +3,11 @@ import json
 import pandas as pd
 import streamlit as st
 
+from src.auth import require_password
 from src.db import get_visit, list_visits
 
 st.set_page_config(page_title="Historia wizyt — MindScribe", page_icon="📚", layout="wide")
+require_password()
 st.title("📚 Historia wizyt")
 
 visits = list_visits()

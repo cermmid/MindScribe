@@ -1,8 +1,10 @@
 import streamlit as st
 
+from src.auth import require_password
 from src.db import init_db
 
 st.set_page_config(page_title="MindScribe", page_icon="🧠", layout="wide")
+require_password()
 
 init_db()
 

@@ -6,3 +6,4 @@ data/*.db
 data/audio/
 .DS_Store
 .streamlit/secrets.toml
+!.streamlit/secrets.toml.example

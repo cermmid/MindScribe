@@ -47,6 +47,38 @@ MindScribe/
 └── data/                     # DB i nagrania (gitignored)
 ```
 
+## Deploy: link "kliknij i działa" dla lekarza (Streamlit Community Cloud)
+
+Cel: wysyłasz lekarzowi *"hej, kliknij w ten link"* i wpisuje hasło — nic nie instaluje. Darmowe, jeśli repo jest publiczne.
+
+### Setup jednorazowy (~5 min)
+
+1. Upewnij się, że repo `cermmid/MindScribe` jest **public** na GitHubie i kod jest na branchu `main` (lub innym, który wskażesz w kroku 3).
+2. Wejdź na **https://share.streamlit.io** → zaloguj się kontem GitHub → kliknij **Create app** → **Deploy a public app from GitHub**.
+3. Wskaż:
+   - Repository: `cermmid/MindScribe`
+   - Branch: `main`
+   - Main file path: `app.py`
+   - App URL: np. `mindscribe-mvp` → dostaniesz `https://mindscribe-mvp.streamlit.app`
+4. **Advanced settings → Secrets** — wklej (wartości weź ze swojego `.streamlit/secrets.toml`):
+   ```toml
+   GEMINI_API_KEY = "..."
+   GEMINI_MODEL = "gemini-2.5-flash"
+   app_password = "..."
+   ```
+5. **Deploy**. Po ~2 minutach apka żyje. Wysyłasz lekarzowi:
+   > Link: https://mindscribe-mvp.streamlit.app
+   > Hasło: \<to z `app_password`\>
+
+Każdy push do tego brancha automatycznie redeployuje apkę.
+
+### Ograniczenia darmowego hostingu — przeczytaj zanim wyślesz link
+
+- **Dane znikają przy restarcie.** Streamlit Cloud ma efemeryczny filesystem — SQLite (`data/mindscribe.db`) i wgrane nagrania kasują się przy redeployu i po dłuższej bezczynności. Few-shot examples też. To OK na pokazanie UX lekarzowi w jednej sesji; do trwałości potrzebny zewnętrzny Postgres (Supabase/Neon — w roadmapie).
+- **URL jest publiczny.** Bramka hasłowa (`src/auth.py`, snippet ze Streamlit docs) gate'uje wejście, ale każdy z linkiem zobaczy pole hasła — nadaj długie, losowe.
+- **~1 GB RAM, 1 CPU**. Wystarczy dla jednego lekarza i plików do ~200 MB.
+- **Brak BAA z Google**. ZERO realnych danych pacjentów na tym deploy'u. Fikcyjne nagrania tylko.
+
 ## Bezpieczeństwo — MUSISZ przeczytać przed użyciem na realnych pacjentach
 
 To MVP. Do testów **wewnętrznych** w gabinecie, na danych fikcyjnych/zanonimizowanych.

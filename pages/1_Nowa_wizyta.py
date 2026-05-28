@@ -2,11 +2,13 @@ import pandas as pd
 import streamlit as st
 
 from src.audio import save_uploaded_audio
+from src.auth import require_password
 from src.db import get_approved_examples, insert_visit, update_visit
 from src.gemini_client import generate_note_from_audio
 from src.schemas import ICDCode, PsychiatricNote
 
 st.set_page_config(page_title="Nowa wizyta — MindScribe", page_icon="🎙️", layout="wide")
+require_password()
 st.title("🎙️ Nowa wizyta")
 
 # --- 1. Wejście audio ----------------------------------------------------------
