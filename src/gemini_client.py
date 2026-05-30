@@ -5,6 +5,7 @@ from google import genai
 from google.genai import types
 
 from .config import GEMINI_API_KEY, GEMINI_MODEL
+from .pricing import estimate_usage_and_cost
 from .prompts import SYSTEM_PROMPT, build_user_prompt
 from .schemas import PsychiatricNote
 
@@ -38,10 +39,10 @@ def _parse(response) -> PsychiatricNote:
 def generate_note_from_audio(
     audio_path: Path,
     few_shot_examples: list[dict],
-) -> tuple[PsychiatricNote, str]:
+) -> tuple[PsychiatricNote, str, dict]:
     """Upload audio to Gemini Files API and request a structured note.
 
-    Returns (note, full_prompt_for_debug).
+    Returns (note, full_prompt_for_debug, usage_dict).
     """
     client = _client()
     uploaded = client.files.upload(file=str(audio_path))
@@ -52,13 +53,14 @@ def generate_note_from_audio(
         contents=[prompt, uploaded],
         config=_generation_config(),
     )
-    return _parse(response), prompt
+    usage = estimate_usage_and_cost(getattr(response, "usage_metadata", None))
+    return _parse(response), prompt, usage
 
 
 def generate_note_from_text(
     transcript: str,
     few_shot_examples: list[dict],
-) -> tuple[PsychiatricNote, str]:
+) -> tuple[PsychiatricNote, str, dict]:
     """Reserved for the future Whisper → text → Gemini pipeline."""
     client = _client()
     prompt = build_user_prompt(few_shot_examples, transcript=transcript)
@@ -67,4 +69,5 @@ def generate_note_from_text(
         contents=[prompt],
         config=_generation_config(),
     )
-    return _parse(response), prompt
+    usage = estimate_usage_and_cost(getattr(response, "usage_metadata", None))
+    return _parse(response), prompt, usage

@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from src.auth import require_password
-from src.db import get_visit, list_visits
+from src.db import get_visit, list_visits, usage_totals
 
 st.set_page_config(page_title="Historia wizyt — MindScribe", page_icon="📚", layout="wide")
 require_password()
@@ -14,6 +14,17 @@ visits = list_visits()
 if not visits:
     st.info("Brak zapisanych wizyt. Przejdź do **Nowa wizyta**, żeby wygenerować pierwszą notatkę.")
     st.stop()
+
+totals = usage_totals()
+t1, t2, t3, t4 = st.columns(4)
+t1.metric("Wizyt łącznie", int(totals["n"]))
+t2.metric("Tokeny wejściowe", f"{int(totals['prompt_tokens']):,}".replace(",", " "))
+t3.metric("Tokeny wyjściowe", f"{int(totals['output_tokens']):,}".replace(",", " "))
+t4.metric("Szacowany koszt łącznie", f"${totals['estimated_cost_usd']:.4f}")
+st.caption(
+    "Koszt to **szacunek** wg stawek z `src/pricing.py` (Gemini 2.5 Flash). "
+    "Realny rachunek sprawdzisz w Google Cloud Billing → *Generative Language API*."
+)
 
 st.dataframe(pd.DataFrame(visits), use_container_width=True, hide_index=True)
 

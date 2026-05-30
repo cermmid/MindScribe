@@ -39,7 +39,7 @@ if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is 
     few_shot = get_approved_examples()
     with st.spinner(f"Gemini analizuje nagranie (few-shot z {len(few_shot)} zatwierdzonych notatek)…"):
         try:
-            note, debug_prompt = generate_note_from_audio(audio_path, few_shot)
+            note, debug_prompt, usage = generate_note_from_audio(audio_path, few_shot)
         except Exception as e:
             st.error(f"Błąd wywołania Gemini: {e}")
             st.stop()
@@ -49,11 +49,26 @@ if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is 
         pipeline="multimodal",
         raw_transcript=note.raw_transcript,
         ai_note_original_json=note.model_dump_json(indent=2),
+        usage=usage,
     )
     st.session_state["current_visit_id"] = visit_id
     st.session_state["current_note"] = note.model_dump()
     st.session_state["debug_prompt"] = debug_prompt
+    st.session_state["current_usage"] = usage
     st.success(f"Wizyta #{visit_id} zapisana jako draft.")
+
+if "current_usage" in st.session_state:
+    u = st.session_state["current_usage"]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Tokeny wejściowe", f"{u['prompt_tokens']:,}".replace(",", " "))
+    m2.metric("Tokeny wyjściowe", f"{u['output_tokens']:,}".replace(",", " "))
+    m3.metric("Razem", f"{u['total_tokens']:,}".replace(",", " "))
+    m4.metric("Szacowany koszt", f"${u['estimated_cost_usd']:.4f}")
+    if u.get("prompt_audio_tokens") or u.get("prompt_text_tokens"):
+        st.caption(
+            f"Rozbicie wejścia: audio {u['prompt_audio_tokens']:,} · tekst {u['prompt_text_tokens']:,} tokenów. "
+            "Stawki w `src/pricing.py` (Gemini 2.5 Flash). Szacunek — sprawdź realny rachunek w Google Cloud Billing."
+        )
 
 # --- 3. HITL: edycja -----------------------------------------------------------
 if "current_note" in st.session_state:
@@ -140,7 +155,7 @@ if "current_note" in st.session_state:
             f"Wizyta #{st.session_state['current_visit_id']} zatwierdzona. "
             "Ta notatka zasili few-shot dla przyszłych generacji."
         )
-        for key in ("current_note", "current_visit_id", "debug_prompt"):
+        for key in ("current_note", "current_visit_id", "debug_prompt", "current_usage"):
             st.session_state.pop(key, None)
 
     if "debug_prompt" in st.session_state:
