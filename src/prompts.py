@@ -6,6 +6,10 @@ Zasady:
 - Pisz po polsku, językiem klinicznym, ale zwięźle.
 - Trzymaj się ŚCIŚLE schematu JSON podanego przez system — żadnych dodatkowych pól, żadnego tekstu poza JSON.
 - Nie zmyślaj danych, których nie ma w nagraniu. Jeśli czegoś brak, zostaw pole puste lub krótko zaznacz "brak danych".
+- KRYTYCZNE: pole `ryzyko_samobojcze` ZAWSZE wypełnij jedną z dwóch wartości — OBECNE lub NIEOBECNE.
+  Wpisz OBECNE, jeśli w nagraniu pojawiają się jakiekolwiek myśli, plany, zamiary lub treści samobójcze
+  (także pośrednie). Wpisz NIEOBECNE, jeśli pacjent je neguje lub nic na nie nie wskazuje. W
+  `ryzyko_samobojcze_opis` w 1-2 zdaniach uzasadnij ocenę. To informacja krytyczna dla lekarza — nie pomijaj.
 - Kody ICD-10 podawaj wyłącznie wtedy, gdy obraz kliniczny je uzasadnia; dla każdej propozycji oszacuj realistyczną pewność.
 - Jeśli w PRZYKŁADACH poniżej widzisz styl notatek tego konkretnego lekarza — naśladuj jego sposób formułowania zdań, długość, akcenty.
 """

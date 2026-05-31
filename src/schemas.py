@@ -1,4 +1,11 @@
+from enum import Enum
+
 from pydantic import BaseModel, Field
+
+
+class RyzykoSamobojcze(str, Enum):
+    OBECNE = "OBECNE"
+    NIEOBECNE = "NIEOBECNE"
 
 
 class ICDCode(BaseModel):
@@ -10,6 +17,17 @@ class ICDCode(BaseModel):
 class PsychiatricNote(BaseModel):
     raw_transcript: str = Field(
         description="Pełna, dosłowna transkrypcja audio z wizyty po polsku."
+    )
+    ryzyko_samobojcze: RyzykoSamobojcze = Field(
+        description=(
+            "Ocena BINARNA myśli/ryzyka samobójczego. OBECNE jeśli w nagraniu pojawiają się "
+            "jakiekolwiek treści lub myśli samobójcze; NIEOBECNE jeśli pacjent neguje lub nic "
+            "na to nie wskazuje. Zawsze dokładnie jedna z dwóch wartości."
+        )
+    )
+    ryzyko_samobojcze_opis: str = Field(
+        default="",
+        description="Krótkie (1-2 zdania) uzasadnienie oceny ryzyka samobójczego.",
     )
     status_psychiczny: str = Field(
         description="Opis aktualnego stanu psychicznego pacjenta (świadomość, orientacja, nastrój, afekt, tok myślenia, postrzeganie)."

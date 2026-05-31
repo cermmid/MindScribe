@@ -4,15 +4,29 @@ import streamlit as st
 from src.audio import save_uploaded_audio
 from src.auth import require_password
 from src.db import get_approved_examples, insert_visit, update_visit
+from src.formatting import note_to_text
 from src.gemini_client import generate_note_from_audio
-from src.schemas import ICDCode, PsychiatricNote
+from src.schemas import ICDCode, PsychiatricNote, RyzykoSamobojcze
+from src.ui import copy_button, render_note
 
 st.set_page_config(page_title="Nowa wizyta — MindScribe", page_icon="🎙️", layout="wide")
 require_password()
 st.title("🎙️ Nowa wizyta")
 
-# --- 1. Wejście audio ----------------------------------------------------------
-st.header("1. Wejście audio")
+# --- 1. Dane wizyty ------------------------------------------------------------
+st.header("1. Dane wizyty")
+visit_label = st.text_input(
+    "Etykieta wizyty (opcjonalnie)",
+    placeholder="np. pacjent A — lęki",
+    help=(
+        "NIE wpisuj imienia, nazwiska ani żadnych danych, które umożliwią identyfikację "
+        "pacjenta przez osoby trzecie. Używaj pseudonimu lub krótkiego opisu."
+    ),
+)
+visit_type = st.radio("Typ wizyty", ["Pierwsza", "Kolejna"], horizontal=True)
+
+# --- 2. Wejście audio ----------------------------------------------------------
+st.header("2. Wejście audio")
 col_a, col_b = st.columns(2)
 with col_a:
     uploaded = st.file_uploader(
@@ -31,8 +45,8 @@ elif recorded is not None:
     audio_bytes = recorded.getvalue()
     audio_suffix = ".wav"
 
-# --- 2. Generacja notatki ------------------------------------------------------
-st.header("2. Generacja notatki")
+# --- 3. Generacja notatki ------------------------------------------------------
+st.header("3. Generacja notatki")
 
 if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is None):
     audio_path = save_uploaded_audio(audio_bytes, suffix=audio_suffix)
@@ -49,6 +63,8 @@ if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is 
         pipeline="multimodal",
         raw_transcript=note.raw_transcript,
         ai_note_original_json=note.model_dump_json(indent=2),
+        visit_label=visit_label.strip() or None,
+        visit_type=visit_type,
         usage=usage,
     )
     st.session_state["current_visit_id"] = visit_id
@@ -70,9 +86,9 @@ if "current_usage" in st.session_state:
             "Stawki w `src/pricing.py` (Gemini 2.5 Flash). Szacunek — sprawdź realny rachunek w Google Cloud Billing."
         )
 
-# --- 3. HITL: edycja -----------------------------------------------------------
+# --- 4. HITL: edycja -----------------------------------------------------------
 if "current_note" in st.session_state:
-    st.header("3. Edycja (Human-in-the-Loop)")
+    st.header("4. Edycja (Human-in-the-Loop)")
     note_data = st.session_state["current_note"]
 
     with st.expander("📄 Surowa transkrypcja", expanded=False):
@@ -82,6 +98,23 @@ if "current_note" in st.session_state:
             height=200,
             label_visibility="collapsed",
         )
+
+    st.markdown("**🛑 Myśli samobójcze** (pole krytyczne)")
+    _risk_options = ["OBECNE", "NIEOBECNE"]
+    _risk_default = note_data.get("ryzyko_samobojcze", "NIEOBECNE")
+    ryzyko = st.radio(
+        "Ryzyko samobójcze",
+        _risk_options,
+        index=_risk_options.index(_risk_default) if _risk_default in _risk_options else 1,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    ryzyko_opis = st.text_input(
+        "Opis / uzasadnienie ryzyka",
+        value=note_data.get("ryzyko_samobojcze_opis", ""),
+    )
+    if ryzyko == "OBECNE":
+        st.error("⚠️ Pacjent z myślami samobójczymi — wymaga szczególnej uwagi klinicznej.")
 
     status_psychiczny = st.text_area(
         "Status psychiczny",
@@ -136,6 +169,8 @@ if "current_note" in st.session_state:
             ]
             corrected = PsychiatricNote(
                 raw_transcript=raw,
+                ryzyko_samobojcze=RyzykoSamobojcze(ryzyko),
+                ryzyko_samobojcze_opis=ryzyko_opis.strip(),
                 status_psychiczny=status_psychiczny,
                 objawy=[s.strip() for s in objawy_text.splitlines() if s.strip()],
                 kody_icd10=[ICDCode(**r) for r in icd_records],
@@ -151,6 +186,9 @@ if "current_note" in st.session_state:
             doctor_note_corrected_json=corrected.model_dump_json(indent=2),
             status="approved",
         )
+        st.session_state["approved_note"] = corrected.model_dump()
+        st.session_state["approved_visit_id"] = st.session_state["current_visit_id"]
+        st.session_state["approved_visit_type"] = visit_type
         st.success(
             f"Wizyta #{st.session_state['current_visit_id']} zatwierdzona. "
             "Ta notatka zasili few-shot dla przyszłych generacji."
@@ -161,3 +199,19 @@ if "current_note" in st.session_state:
     if "debug_prompt" in st.session_state:
         with st.expander("🐛 Debug: prompt wysłany do Gemini", expanded=False):
             st.code(st.session_state["debug_prompt"], language="markdown")
+
+# --- 5. Zatwierdzona notatka do skopiowania -----------------------------------
+if "approved_note" in st.session_state:
+    st.header("5. Gotowa notatka")
+    approved = st.session_state["approved_note"]
+    a_type = st.session_state.get("approved_visit_type")
+    render_note(approved, visit_type=a_type)
+
+    note_text = note_to_text(
+        approved,
+        title=f"Wizyta #{st.session_state.get('approved_visit_id', '')}",
+        visit_type=a_type,
+    )
+    copy_button(note_text, key="copy_new")
+    with st.expander("📄 Pełny tekst (zaznacz i skopiuj ręcznie)", expanded=False):
+        st.text(note_text)
