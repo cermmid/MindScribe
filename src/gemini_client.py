@@ -76,12 +76,19 @@ def _client() -> genai.Client:
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
+# Budżet tokenów "myślenia" (Gemini 2.5). Niski, bo zadanie audio→ustrukturyzowana
+# notatka nie wymaga długiego rozumowania. 0 = wyłączone; tu zostawiamy minimalny
+# margines na poprawność wyciągania pól. Zwiększ, jeśli jakość notatek spadnie.
+THINKING_BUDGET = 256
+
+
 def _generation_config() -> types.GenerateContentConfig:
     return types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         response_mime_type="application/json",
         response_schema=PsychiatricNote,
         temperature=0.2,
+        thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
     )
 
 
