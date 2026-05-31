@@ -41,6 +41,8 @@ _GCP_KEY_JSON = (
     or _from_secrets("GOOGLE_APPLICATION_CREDENTIALS_JSON")
     or ""
 )
+# Wystawione publicznie — gemini_client buduje z tego poświadczenia bezpośrednio.
+GCP_CREDENTIALS_JSON = _GCP_KEY_JSON.strip()
 
 
 def _materialize_gcp_key() -> None:
