@@ -15,6 +15,15 @@ from .pricing import estimate_usage_and_cost
 from .prompts import SYSTEM_PROMPT, build_user_prompt
 from .schemas import PsychiatricNote
 
+_AUDIO_MIME = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+    ".webm": "audio/webm",
+    ".flac": "audio/flac",
+}
+
 
 @lru_cache(maxsize=1)
 def _client() -> genai.Client:
@@ -54,17 +63,22 @@ def generate_note_from_audio(
     audio_path: Path,
     few_shot_examples: list[dict],
 ) -> tuple[PsychiatricNote, str, dict]:
-    """Upload audio to Gemini Files API and request a structured note.
+    """Send audio inline (as bytes) and request a structured note.
 
-    Returns (note, full_prompt_for_debug, usage_dict).
+    Inline payload works for both Vertex AI and the Developer API. Vertex AI
+    does not expose the Files API, so this is the portable path.
     """
     client = _client()
-    uploaded = client.files.upload(file=str(audio_path))
+    mime = _AUDIO_MIME.get(audio_path.suffix.lower(), "audio/mpeg")
+    audio_part = types.Part.from_bytes(
+        data=audio_path.read_bytes(),
+        mime_type=mime,
+    )
     prompt = build_user_prompt(few_shot_examples, transcript=None)
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
-        contents=[prompt, uploaded],
+        contents=[prompt, audio_part],
         config=_generation_config(),
     )
     usage = estimate_usage_and_cost(getattr(response, "usage_metadata", None))
