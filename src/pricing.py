@@ -21,8 +21,12 @@ def _modality_breakdown(prompt_details) -> dict[str, int]:
     if not prompt_details:
         return out
     for item in prompt_details:
-        modality = getattr(item, "modality", None) or item.get("modality") if isinstance(item, dict) else None
-        count = getattr(item, "token_count", None) or (item.get("token_count") if isinstance(item, dict) else 0)
+        if isinstance(item, dict):
+            modality = item.get("modality")
+            count = item.get("token_count")
+        else:
+            modality = getattr(item, "modality", None)
+            count = getattr(item, "token_count", None)
         if modality is None:
             continue
         key = str(modality).lower().split(".")[-1]
@@ -41,35 +45,46 @@ def estimate_usage_and_cost(usage_metadata) -> dict:
         return {
             "prompt_tokens": 0,
             "output_tokens": 0,
+            "thoughts_tokens": 0,
             "total_tokens": 0,
             "prompt_audio_tokens": 0,
             "prompt_text_tokens": 0,
+            "modality_known": False,
             "estimated_cost_usd": 0.0,
         }
 
     prompt_total = int(getattr(usage_metadata, "prompt_token_count", 0) or 0)
     output_total = int(getattr(usage_metadata, "candidates_token_count", 0) or 0)
-    grand_total = int(getattr(usage_metadata, "total_token_count", 0) or (prompt_total + output_total))
+    # Tokeny "myślenia" (Gemini 2.5). Bywają raportowane osobno i też są płatne jak output.
+    thoughts_total = int(getattr(usage_metadata, "thoughts_token_count", 0) or 0)
+    grand_total = int(
+        getattr(usage_metadata, "total_token_count", 0)
+        or (prompt_total + output_total + thoughts_total)
+    )
 
     details = _modality_breakdown(getattr(usage_metadata, "prompt_tokens_details", None))
     audio_tokens = details.get("audio", 0)
     text_tokens = details.get("text", 0) + details.get("image", 0) + details.get("video", 0)
 
-    if audio_tokens == 0 and text_tokens == 0:
+    modality_known = bool(audio_tokens or text_tokens)
+    if not modality_known:
         audio_tokens = prompt_total
         text_tokens = 0
 
+    billable_output = output_total + thoughts_total
     cost = (
         audio_tokens * PRICING_USD_PER_1M["audio_input"]
         + text_tokens * PRICING_USD_PER_1M["text_input"]
-        + output_total * PRICING_USD_PER_1M["output"]
+        + billable_output * PRICING_USD_PER_1M["output"]
     ) / 1_000_000
 
     return {
         "prompt_tokens": prompt_total,
         "output_tokens": output_total,
+        "thoughts_tokens": thoughts_total,
         "total_tokens": grand_total,
         "prompt_audio_tokens": audio_tokens,
         "prompt_text_tokens": text_tokens,
+        "modality_known": modality_known,
         "estimated_cost_usd": round(cost, 6),
     }

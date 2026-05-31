@@ -85,9 +85,16 @@ if "current_usage" in st.session_state:
     m2.metric("Tokeny wyjściowe", f"{u['output_tokens']:,}".replace(",", " "))
     m3.metric("Razem", f"{u['total_tokens']:,}".replace(",", " "))
     m4.metric("Szacowany koszt", f"{cost_pln:.4f} zł")
+    _modality_note = (
+        f"audio {u.get('prompt_audio_tokens', 0):,} · tekst {u.get('prompt_text_tokens', 0):,}"
+        if u.get("modality_known")
+        else f"całość {u.get('prompt_tokens', 0):,} liczona po stawce audio (brak rozbicia z API)"
+    )
+    _thoughts = u.get("thoughts_tokens", 0)
+    _thoughts_note = f" · myślenie {_thoughts:,}" if _thoughts else ""
     st.caption(
         f"Kurs USD/PLN **{usd_pln:.4f}** ({rate_source}); w USD: ${u['estimated_cost_usd']:.4f}. "
-        f"Rozbicie wejścia: audio {u.get('prompt_audio_tokens', 0):,} · tekst {u.get('prompt_text_tokens', 0):,} tokenów. "
+        f"Wejście: {_modality_note} tokenów. Wyjście: {u.get('output_tokens', 0):,}{_thoughts_note} tokenów. "
         "Szacunek — sprawdź realny rachunek w Google Cloud Billing."
     )
 
