@@ -1,18 +1,16 @@
 from functools import lru_cache
 from pathlib import Path
 
-import json
-
 from google import genai
 from google.genai import types
 
 from .config import (
-    GCP_CREDENTIALS_JSON,
     GCP_LOCATION,
     GCP_PROJECT_ID,
     GEMINI_API_KEY,
     GEMINI_MODEL,
     USE_VERTEX_AI,
+    _gcp_credentials_info,
 )
 from .pricing import estimate_usage_and_cost
 from .prompts import SYSTEM_PROMPT, build_user_prompt
@@ -29,12 +27,20 @@ _AUDIO_MIME = {
 
 
 def _vertex_credentials():
-    """Buduj poświadczenia service account wprost z JSON-a (bez ADC/metadata server)."""
-    if not GCP_CREDENTIALS_JSON:
+    """Zbuduj poświadczenia service account z secrets — bez polegania na ADC/metadata server."""
+    try:
+        info = _gcp_credentials_info()
+    except Exception as e:
+        raise RuntimeError(
+            "Nie udało się sparsować poświadczeń service account. "
+            "Wklej cały plik JSON jako GOOGLE_APPLICATION_CREDENTIALS_JSON "
+            "w potrójnych cudzysłowach, albo użyj sekcji [gcp_service_account] "
+            f"z polami pole-po-polu. Szczegóły: {e}"
+        ) from e
+    if info is None:
         return None
     from google.oauth2 import service_account
 
-    info = json.loads(GCP_CREDENTIALS_JSON)
     return service_account.Credentials.from_service_account_info(
         info, scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
@@ -48,17 +54,12 @@ def _client() -> genai.Client:
                 "USE_VERTEX_AI=true, ale brak GCP_PROJECT_ID. "
                 "Uzupełnij sekrety (GCP_PROJECT_ID, GCP_LOCATION, GOOGLE_APPLICATION_CREDENTIALS_JSON)."
             )
-        try:
-            creds = _vertex_credentials()
-        except Exception as e:
-            raise RuntimeError(
-                "Nie udało się odczytać GOOGLE_APPLICATION_CREDENTIALS_JSON — "
-                f"sprawdź, czy wklejony JSON jest kompletny (w potrójnych cudzysłowach). Szczegóły: {e}"
-            ) from e
+        creds = _vertex_credentials()
         if creds is None:
             raise RuntimeError(
-                "USE_VERTEX_AI=true, ale brak GOOGLE_APPLICATION_CREDENTIALS_JSON w sekretach. "
-                "Wklej cały plik JSON service account między potrójne cudzysłowy."
+                "USE_VERTEX_AI=true, ale brak poświadczeń service account w sekretach. "
+                "Wklej cały plik JSON jako GOOGLE_APPLICATION_CREDENTIALS_JSON "
+                "(między potrójnymi cudzysłowami), albo użyj sekcji [gcp_service_account]."
             )
         return genai.Client(
             vertexai=True,

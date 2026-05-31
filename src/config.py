@@ -1,6 +1,6 @@
 import json
 import os
-import stat
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,7 +11,6 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data"
 AUDIO_DIR = DATA_DIR / "audio"
 DB_PATH = DATA_DIR / "mindscribe.db"
-GCP_KEY_PATH = DATA_DIR / ".gcp-key.json"
 
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -36,31 +35,61 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL") or _from_secrets("GEMINI_MODEL") or "ge
 USE_VERTEX_AI = _as_bool(os.getenv("USE_VERTEX_AI") or _from_secrets("USE_VERTEX_AI") or "false")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID") or _from_secrets("GCP_PROJECT_ID") or ""
 GCP_LOCATION = os.getenv("GCP_LOCATION") or _from_secrets("GCP_LOCATION") or "europe-west4"
-_GCP_KEY_JSON = (
-    os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    or _from_secrets("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    or ""
-)
-# Wystawione publicznie — gemini_client buduje z tego poświadczenia bezpośrednio.
-GCP_CREDENTIALS_JSON = _GCP_KEY_JSON.strip()
 
 
-def _materialize_gcp_key() -> None:
-    """Zapisz JSON klucza service account do pliku i wystaw zmienną GOOGLE_APPLICATION_CREDENTIALS."""
-    if not USE_VERTEX_AI or not _GCP_KEY_JSON:
-        return
+def _tolerant_json_loads(raw: str) -> dict:
+    """json.loads, ale z auto-naprawą literalnych nowych linii w 'private_key'.
+
+    Najczęstszy problem przy wklejaniu klucza service account do TOML:
+    wartość private_key zawiera literalne \\n, które po wklejeniu w '''...'''
+    stają się prawdziwymi nowymi liniami — JSON tego nie znosi w stringu.
+    """
     try:
-        json.loads(_GCP_KEY_JSON)
-    except Exception:
-        return
-    GCP_KEY_PATH.write_text(_GCP_KEY_JSON)
-    try:
-        os.chmod(GCP_KEY_PATH, stat.S_IRUSR | stat.S_IWUSR)
-    except Exception:
+        return json.loads(raw)
+    except json.JSONDecodeError:
         pass
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(GCP_KEY_PATH)
+
+    m = re.search(r'"private_key"\s*:\s*"', raw)
+    if not m:
+        return json.loads(raw)  # rzuci oryginalny błąd
+
+    start = m.end()
+    i = start
+    while i < len(raw):
+        if raw[i] == "\\":
+            i += 2
+            continue
+        if raw[i] == '"':
+            break
+        i += 1
+    if i >= len(raw):
+        return json.loads(raw)
+
+    value = raw[start:i]
+    fixed_value = value.replace("\r\n", "\\n").replace("\n", "\\n").replace("\r", "\\n")
+    return json.loads(raw[:start] + fixed_value + raw[i:])
 
 
-_materialize_gcp_key()
+def _gcp_credentials_info() -> dict | None:
+    """Zbierz dict z poświadczeniami service account z dowolnego z obsługiwanych źródeł.
+
+    Kolejność:
+      1. GOOGLE_APPLICATION_CREDENTIALS_JSON (string z całym JSON, env lub secrets) — tolerancyjny parser.
+      2. Sekcja [gcp_service_account] w secrets (zalecany styl Streamlit dla GCP).
+    """
+    raw = (
+        os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+        or _from_secrets("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+        or ""
+    ).strip()
+    if raw:
+        return _tolerant_json_loads(raw)
+
+    section = _from_secrets("gcp_service_account")
+    if section:
+        return dict(section)
+
+    return None
+
 
 FEW_SHOT_LIMIT = 3
