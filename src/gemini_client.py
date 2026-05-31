@@ -4,7 +4,13 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
-from .config import GEMINI_API_KEY, GEMINI_MODEL
+from .config import (
+    GCP_LOCATION,
+    GCP_PROJECT_ID,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    USE_VERTEX_AI,
+)
 from .pricing import estimate_usage_and_cost
 from .prompts import SYSTEM_PROMPT, build_user_prompt
 from .schemas import PsychiatricNote
@@ -12,11 +18,19 @@ from .schemas import PsychiatricNote
 
 @lru_cache(maxsize=1)
 def _client() -> genai.Client:
+    if USE_VERTEX_AI:
+        if not GCP_PROJECT_ID:
+            raise RuntimeError(
+                "USE_VERTEX_AI=true, ale brak GCP_PROJECT_ID. "
+                "Uzupełnij sekrety (GCP_PROJECT_ID, GCP_LOCATION, GOOGLE_APPLICATION_CREDENTIALS_JSON)."
+            )
+        return genai.Client(vertexai=True, project=GCP_PROJECT_ID, location=GCP_LOCATION)
+
     if not GEMINI_API_KEY:
         raise RuntimeError(
-            "Brak GEMINI_API_KEY w .env. Skopiuj .env.example do .env i uzupełnij klucz."
+            "Brak GEMINI_API_KEY. Skopiuj .env.example do .env i uzupełnij klucz, "
+            "albo włącz Vertex AI (USE_VERTEX_AI=true)."
         )
-    # Produkcyjnie: genai.Client(vertexai=True, project=..., location=...) — patrz README.
     return genai.Client(api_key=GEMINI_API_KEY)
 
 

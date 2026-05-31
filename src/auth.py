@@ -11,32 +11,50 @@ def _get_expected_password() -> str | None:
     return pw or None
 
 
-def require_password() -> None:
-    """Block the page until the user enters the password from st.secrets["app_password"].
+def current_doctor() -> str | None:
+    return st.session_state.get("doctor_name") or None
 
-    If no password is configured (local dev without secrets.toml), this is a no-op.
+
+def require_password() -> None:
+    """Block the page until the doctor enters their name and the password.
+
+    Doctor name is mandatory and persists in session_state['doctor_name'].
+    If no password is configured (local dev), the password check is skipped
+    but the doctor name is still required.
     """
     expected = _get_expected_password()
-    if expected is None:
+    already_in = st.session_state.get("auth_ok") and current_doctor()
+
+    if already_in:
+        if doc := current_doctor():
+            st.sidebar.caption(f"👩‍⚕️ Zalogowany: {doc}")
         return
 
-    if st.session_state.get("password_correct"):
-        return
+    st.title("🔐 Logowanie")
+    with st.form("login_form", clear_on_submit=False):
+        doctor_name = st.text_input(
+            "Imię i nazwisko lekarza",
+            value=st.session_state.get("doctor_name", ""),
+            placeholder="np. dr Anna Kowalska",
+        )
+        password = (
+            st.text_input("Hasło dostępu", type="password")
+            if expected is not None
+            else ""
+        )
+        submitted = st.form_submit_button("Wejdź", type="primary")
 
-    def _check():
-        entered = st.session_state.get("password", "")
-        if hmac.compare_digest(entered, expected):
-            st.session_state["password_correct"] = True
-            st.session_state.pop("password", None)
-        else:
-            st.session_state["password_correct"] = False
+    if not submitted:
+        st.stop()
 
-    st.text_input(
-        "🔒 Hasło dostępu",
-        type="password",
-        on_change=_check,
-        key="password",
-    )
-    if st.session_state.get("password_correct") is False:
+    if not doctor_name.strip():
+        st.error("Wpisz imię i nazwisko lekarza.")
+        st.stop()
+
+    if expected is not None and not hmac.compare_digest(password, expected):
         st.error("Nieprawidłowe hasło.")
-    st.stop()
+        st.stop()
+
+    st.session_state["doctor_name"] = doctor_name.strip()
+    st.session_state["auth_ok"] = True
+    st.rerun()

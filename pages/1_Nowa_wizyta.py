@@ -2,10 +2,12 @@ import pandas as pd
 import streamlit as st
 
 from src.audio import save_uploaded_audio
-from src.auth import require_password
+from src.auth import current_doctor, require_password
 from src.db import get_approved_examples, insert_visit, update_visit
 from src.formatting import note_to_text
 from src.gemini_client import generate_note_from_audio
+from src.nbp import get_usd_pln_rate
+from src.pricing import usd_to_pln
 from src.schemas import ICDCode, PsychiatricNote, RyzykoSamobojcze
 from src.ui import copy_button, render_note
 
@@ -65,6 +67,7 @@ if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is 
         ai_note_original_json=note.model_dump_json(indent=2),
         visit_label=visit_label.strip() or None,
         visit_type=visit_type,
+        doctor_id=current_doctor(),
         usage=usage,
     )
     st.session_state["current_visit_id"] = visit_id
@@ -75,16 +78,18 @@ if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is 
 
 if "current_usage" in st.session_state:
     u = st.session_state["current_usage"]
+    usd_pln, rate_source = get_usd_pln_rate()
+    cost_pln = usd_to_pln(u["estimated_cost_usd"], usd_pln)
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Tokeny wejściowe", f"{u['prompt_tokens']:,}".replace(",", " "))
     m2.metric("Tokeny wyjściowe", f"{u['output_tokens']:,}".replace(",", " "))
     m3.metric("Razem", f"{u['total_tokens']:,}".replace(",", " "))
-    m4.metric("Szacowany koszt", f"${u['estimated_cost_usd']:.4f}")
-    if u.get("prompt_audio_tokens") or u.get("prompt_text_tokens"):
-        st.caption(
-            f"Rozbicie wejścia: audio {u['prompt_audio_tokens']:,} · tekst {u['prompt_text_tokens']:,} tokenów. "
-            "Stawki w `src/pricing.py` (Gemini 2.5 Flash). Szacunek — sprawdź realny rachunek w Google Cloud Billing."
-        )
+    m4.metric("Szacowany koszt", f"{cost_pln:.4f} zł")
+    st.caption(
+        f"Kurs USD/PLN **{usd_pln:.4f}** ({rate_source}); w USD: ${u['estimated_cost_usd']:.4f}. "
+        f"Rozbicie wejścia: audio {u.get('prompt_audio_tokens', 0):,} · tekst {u.get('prompt_text_tokens', 0):,} tokenów. "
+        "Szacunek — sprawdź realny rachunek w Google Cloud Billing."
+    )
 
 # --- 4. HITL: edycja -----------------------------------------------------------
 if "current_note" in st.session_state:
@@ -211,6 +216,7 @@ if "approved_note" in st.session_state:
         approved,
         title=f"Wizyta #{st.session_state.get('approved_visit_id', '')}",
         visit_type=a_type,
+        doctor_name=current_doctor(),
     )
     copy_button(note_text, key="copy_new")
     with st.expander("📄 Pełny tekst (zaznacz i skopiuj ręcznie)", expanded=False):

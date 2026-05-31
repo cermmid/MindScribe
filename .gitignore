@@ -7,3 +7,4 @@ data/audio/
 .DS_Store
 .streamlit/secrets.toml
 !.streamlit/secrets.toml.example
+data/.gcp-key.json

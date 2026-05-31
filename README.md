@@ -79,29 +79,50 @@ Każdy push do tego brancha automatycznie redeployuje apkę.
 - **~1 GB RAM, 1 CPU**. Wystarczy dla jednego lekarza i plików do ~200 MB.
 - **Brak BAA z Google**. ZERO realnych danych pacjentów na tym deploy'u. Fikcyjne nagrania tylko.
 
-## Bezpieczeństwo — MUSISZ przeczytać przed użyciem na realnych pacjentach
+## Włączenie Vertex AI (10–15 min)
 
-To MVP. Do testów **wewnętrznych** w gabinecie, na danych fikcyjnych/zanonimizowanych.
+Vertex AI w Google Cloud nie wykorzystuje danych klienta do trenowania modeli publicznych — w przeciwieństwie do darmowego tieru Gemini API. To pierwszy krok w stronę użycia z realnymi pacjentami (ale nie jedyny — patrz checklista poniżej).
 
-Zanim wpuścisz tu dane pacjentów:
+1. **Google Cloud Console** → projekt z włączonym billingiem (ten sam, z którego masz klucz API).
+2. **APIs & Services → Library** → wyszukaj „Vertex AI API" → **Enable**.
+3. **IAM & Admin → Service Accounts** → **Create Service Account**. Nazwa np. `mindscribe-vertex`.
+4. Tej service account przypisz rolę **Vertex AI User** (`roles/aiplatform.user`).
+5. Otwórz utworzone konto → zakładka **Keys** → **Add key → Create new key → JSON** → pobierze się plik.
+6. W Streamlit Cloud → *Manage app → Settings → Secrets* dopisz (oprócz istniejących):
+   ```toml
+   USE_VERTEX_AI = true
+   GCP_PROJECT_ID = "twoj-projekt-id"
+   GCP_LOCATION = "europe-west4"    # region UE; fallback: "europe-west1"
 
-1. **Przełącz klienta na Vertex AI**. W `src/gemini_client.py` zamień:
-   ```python
-   genai.Client(api_key=GEMINI_API_KEY)
+   GOOGLE_APPLICATION_CREDENTIALS_JSON = """
+   <<wklej tutaj CAŁY plik JSON service account, bez zmian>>
+   """
    ```
-   na:
-   ```python
-   genai.Client(vertexai=True, project="twój-gcp-project", location="europe-west4")
-   ```
-   Vertex AI w Google Cloud nie wykorzystuje danych klienta do trenowania modeli publicznych i podpada pod BAA Google Cloud — w przeciwieństwie do darmowego tieru Gemini API.
-2. **Zaimplementuj moduł anonimizacji** (planowany `src/anonymize.py`): usuwanie imion, nazwisk, PESEL, adresów z transkrypcji przed przekazaniem do widoku/eksportu.
-3. **Wystaw produkcyjnie za autoryzacją**. Streamlit MVP nie ma uwierzytelniania — uruchamiaj tylko lokalnie lub za reverse-proxy z auth.
-4. **Nie commituj `.env`** ani plików z `data/`.
+   Potrójne cudzysłowy są obowiązkowe — JSON ma własne cudzysłowy i znaki nowej linii.
+7. **Reboot** apki. W Cloud Console → **Vertex AI → Metrics** powinieneś zobaczyć request po pierwszej generacji notatki (a NIE w „Generative Language API").
+
+Stawki na Vertex AI bywają minimalnie inne niż na Gemini API; szacunek z `src/pricing.py` zostaje przybliżony.
+
+## Zanim wpuścisz REALNEGO pacjenta — checklista RODO/medyczna
+
+**Samo przełączenie klienta na Vertex AI to NIE wystarcza** do legalnego przetwarzania danych psychiatrycznych w UE. Dane o zdrowiu psychicznym to dane szczególnej kategorii (art. 9 RODO).
+
+- [ ] **Umowa powierzenia przetwarzania (DPA)** podpisana z Google Cloud (Data Processing and Security Terms — robisz to w Cloud Console po stronie organizacji).
+- [ ] **Hosting przeniesiony ze Streamlit Community Cloud na Google Cloud Run** w regionie UE (Streamlit Cloud nie ma DPA dla danych medycznych, a filesystem jest efemeryczny).
+- [ ] **Anonimizacja PII przed wysłaniem do Gemini** (`src/anonymize.py` — TODO; usuwanie imion, nazwisk, PESEL, adresów, telefonów z transkrypcji przed promptem).
+- [ ] **Zgoda pacjenta** na nagrywanie i analizę AI (formularz w UI lub papierowy; konkretna, świadoma, dobrowolna).
+- [ ] **Audyt logów dostępu**, RBAC i bezpieczne uwierzytelnianie lekarzy (zamiast jednego hasła w sekretach).
+- [ ] **Polityka retencji** nagrań i transkrypcji, prawo pacjenta do usunięcia (RODO art. 17).
+- [ ] **Trwała baza** poza efemerycznym kontenerem (np. Postgres w UE).
+
+Do tego momentu apka **testowana jest wyłącznie na fikcyjnych/zaaranżowanych nagraniach**.
 
 ## Roadmapa (poza MVP)
 
+- Migracja hostingu na **Cloud Run w UE** + DPA z Google.
+- `src/anonymize.py` — usuwanie PII z transkrypcji.
+- Formularz zgody pacjenta przed nagraniem.
+- Trwała baza Postgres (Supabase/Neon/Cloud SQL w UE).
+- Multi-tenant — `doctor_id` realnie wykorzystany do separacji danych.
+- Autentykacja per lekarz (zamiast jednego hasła), RBAC, audyt logów.
 - Ścieżka B: Whisper → tekst → Gemini (alternatywny pipeline, `generate_note_from_text` już jest jako stub).
-- Migracja DB do PostgreSQL.
-- Multi-tenant (kolumna `doctor_id` już zarezerwowana).
-- Moduł anonimizacji.
-- Autentykacja, RBAC, audyt logów.

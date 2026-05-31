@@ -11,6 +11,10 @@ PRICING_USD_PER_1M: dict[str, float] = {
 }
 
 
+def usd_to_pln(usd: float, rate: float) -> float:
+    return float(usd) * float(rate)
+
+
 def _modality_breakdown(prompt_details) -> dict[str, int]:
     """Convert SDK's prompt_tokens_details (list of ModalityTokenCount) -> {modality: count}."""
     out: dict[str, int] = {}

@@ -6,6 +6,8 @@ na starszych zatwierdzonych notatkach sprzed dodania pola ryzyka samobójczego.
 
 from typing import Any
 
+import pandas as pd
+
 
 def visit_type_label(visit_type: str | None) -> str:
     v = (visit_type or "").strip().lower()
@@ -45,6 +47,7 @@ def note_to_text(
     title: str | None = None,
     visit_type: str | None = None,
     created_at: str | None = None,
+    doctor_name: str | None = None,
 ) -> str:
     """Zbuduj pełną, czytelną notatkę tekstową gotową do skopiowania."""
     lines: list[str] = []
@@ -103,4 +106,40 @@ def note_to_text(
         lines.extend(f"- {z}" for z in zalecenia)
         lines.append("")
 
+    if doctor_name:
+        lines.append(f"Lekarz: {doctor_name}")
+
     return "\n".join(lines).strip() + "\n"
+
+
+# Polskie nazwy kolumn dla widoku Historii. Kolejność = porządek kluczy w słowniku.
+_COLUMN_RENAME: dict[str, str] = {
+    "id": "numer",
+    "visit_label": "nazwa wizyty",
+    "created_at": "utworzona",
+    "visit_type": "pierwsza czy kolejna wizyta",
+    "doctor_id": "lekarz",
+    "status": "status",
+    "pipeline": "tryb",
+    "prompt_tokens": "tokeny wejście",
+    "output_tokens": "tokeny wyjście",
+    "total_tokens": "tokeny razem",
+    "estimated_cost_usd": "szacowany koszt (PLN)",
+}
+
+
+def humanize_visits_df(visits: list[dict[str, Any]], usd_pln: float) -> pd.DataFrame:
+    """Tabela wizyt z polskimi nagłówkami, w ustalonej kolejności, z kosztem w PLN."""
+    if not visits:
+        return pd.DataFrame(columns=list(_COLUMN_RENAME.values()))
+
+    df = pd.DataFrame(visits)
+    if "created_at" in df.columns:
+        df["created_at"] = df["created_at"].astype(str).str.replace("T", " ").str[:16]
+    if "visit_type" in df.columns:
+        df["visit_type"] = df["visit_type"].apply(visit_type_label)
+    if "estimated_cost_usd" in df.columns:
+        df["estimated_cost_usd"] = (df["estimated_cost_usd"].astype(float) * float(usd_pln)).round(4)
+
+    keep = [c for c in _COLUMN_RENAME if c in df.columns]
+    return df[keep].rename(columns=_COLUMN_RENAME)
