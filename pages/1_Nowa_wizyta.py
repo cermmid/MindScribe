@@ -1,14 +1,19 @@
 import pandas as pd
 import streamlit as st
 
-from src.audio import save_uploaded_audio
 from src.auth import current_doctor, require_password
-from src.db import get_approved_examples, insert_visit, update_visit
 from src.formatting import note_to_text
-from src.gemini_client import generate_note_from_audio
 from src.nbp import get_usd_pln_rate
 from src.pricing import usd_to_pln
-from src.schemas import ICDCode, PsychiatricNote, RyzykoSamobojcze
+from src.services import (
+    DEFAULT_AUDIO_SUFFIX,
+    approve_note,
+    build_corrected_note,
+    create_visit_from_audio,
+    derive_audio_suffix,
+    load_few_shot_examples,
+    split_lines,
+)
 from src.ui import copy_button, render_note
 
 st.set_page_config(page_title="Nowa wizyta — MindScribe", page_icon="🎙️", layout="wide")
@@ -39,42 +44,38 @@ with col_b:
     recorded = st.audio_input("…lub nagraj z mikrofonu")
 
 audio_bytes: bytes | None = None
-audio_suffix = ".wav"
+audio_suffix = DEFAULT_AUDIO_SUFFIX
 if uploaded is not None:
     audio_bytes = uploaded.getvalue()
-    audio_suffix = "." + (uploaded.name.rsplit(".", 1)[-1].lower() if "." in uploaded.name else "wav")
+    audio_suffix = derive_audio_suffix(uploaded.name)
 elif recorded is not None:
     audio_bytes = recorded.getvalue()
-    audio_suffix = ".wav"
+    audio_suffix = DEFAULT_AUDIO_SUFFIX
 
 # --- 3. Generacja notatki ------------------------------------------------------
 st.header("3. Generacja notatki")
 
 if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is None):
-    audio_path = save_uploaded_audio(audio_bytes, suffix=audio_suffix)
-    few_shot = get_approved_examples()
+    few_shot = load_few_shot_examples()
     with st.spinner(f"Gemini analizuje nagranie (few-shot z {len(few_shot)} zatwierdzonych notatek)…"):
         try:
-            note, debug_prompt, usage = generate_note_from_audio(audio_path, few_shot)
+            created = create_visit_from_audio(
+                audio_bytes,
+                audio_suffix=audio_suffix,
+                visit_label=visit_label,
+                visit_type=visit_type,
+                doctor_id=current_doctor(),
+                few_shot=few_shot,
+            )
         except Exception as e:
             st.error(f"Błąd wywołania Gemini: {e}")
             st.stop()
 
-    visit_id = insert_visit(
-        audio_path=str(audio_path),
-        pipeline="multimodal",
-        raw_transcript=note.raw_transcript,
-        ai_note_original_json=note.model_dump_json(indent=2),
-        visit_label=visit_label.strip() or None,
-        visit_type=visit_type,
-        doctor_id=current_doctor(),
-        usage=usage,
-    )
-    st.session_state["current_visit_id"] = visit_id
-    st.session_state["current_note"] = note.model_dump()
-    st.session_state["debug_prompt"] = debug_prompt
-    st.session_state["current_usage"] = usage
-    st.success(f"Wizyta #{visit_id} zapisana jako draft.")
+    st.session_state["current_visit_id"] = created.visit_id
+    st.session_state["current_note"] = created.note.model_dump()
+    st.session_state["debug_prompt"] = created.debug_prompt
+    st.session_state["current_usage"] = created.usage
+    st.success(f"Wizyta #{created.visit_id} zapisana jako draft.")
 
 if "current_usage" in st.session_state:
     u = st.session_state["current_usage"]
@@ -170,34 +171,21 @@ if "current_note" in st.session_state:
 
     if st.button("✅ Zatwierdź i zapisz", type="primary"):
         try:
-            icd_records = [
-                ICDCode(
-                    code=str(r.get("code", "")).strip(),
-                    description=str(r.get("description", "")).strip(),
-                    confidence=float(r.get("confidence", 0.0) or 0.0),
-                ).model_dump()
-                for _, r in edited_icd.iterrows()
-                if str(r.get("code", "")).strip()
-            ]
-            corrected = PsychiatricNote(
+            corrected = build_corrected_note(
                 raw_transcript=raw,
-                ryzyko_samobojcze=RyzykoSamobojcze(ryzyko),
-                ryzyko_samobojcze_opis=ryzyko_opis.strip(),
+                ryzyko_samobojcze=ryzyko,
+                ryzyko_samobojcze_opis=ryzyko_opis,
                 status_psychiczny=status_psychiczny,
-                objawy=[s.strip() for s in objawy_text.splitlines() if s.strip()],
-                kody_icd10=[ICDCode(**r) for r in icd_records],
-                zalecenia=[s.strip() for s in zalecenia_text.splitlines() if s.strip()],
+                objawy=split_lines(objawy_text),
+                kody_icd10=edited_icd.to_dict("records"),
+                zalecenia=split_lines(zalecenia_text),
                 podsumowanie=podsumowanie,
             )
         except Exception as e:
             st.error(f"Notatka nie przeszła walidacji: {e}")
             st.stop()
 
-        update_visit(
-            st.session_state["current_visit_id"],
-            doctor_note_corrected_json=corrected.model_dump_json(indent=2),
-            status="approved",
-        )
+        approve_note(st.session_state["current_visit_id"], corrected)
         st.session_state["approved_note"] = corrected.model_dump()
         st.session_state["approved_visit_id"] = st.session_state["current_visit_id"]
         st.session_state["approved_visit_type"] = visit_type

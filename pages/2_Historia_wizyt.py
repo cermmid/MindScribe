@@ -7,6 +7,7 @@ from src.db import get_visit, list_visits, usage_totals
 from src.formatting import display_name, humanize_visits_df, note_to_text
 from src.nbp import get_usd_pln_rate
 from src.pricing import usd_to_pln
+from src.services import resolve_note_version
 from src.ui import copy_button, render_note
 
 st.set_page_config(page_title="Historia wizyt — MindScribe", page_icon="📚", layout="wide")
@@ -57,16 +58,12 @@ with st.expander("📂 Pokaż szczegóły wizyty", expanded=False):
             f"tryb: {visit['pipeline']} · lekarz: {visit.get('doctor_id') or '_brak_'}"
         )
 
+        resolved = resolve_note_version(visit)
         corrected = visit.get("doctor_note_corrected_json")
-        source_json = corrected or visit.get("ai_note_original_json")
-        if not corrected:
+        if not resolved.is_corrected:
             st.info("Wizyta niezatwierdzona — pokazana wersja oryginalna AI.")
 
-        try:
-            note = json.loads(source_json) if source_json else None
-        except Exception:
-            note = None
-
+        note = resolved.note
         if note:
             render_note(note, visit_type=visit.get("visit_type"))
             note_text = note_to_text(
@@ -80,7 +77,7 @@ with st.expander("📂 Pokaż szczegóły wizyty", expanded=False):
             with st.expander("📄 Pełny tekst (zaznacz i skopiuj ręcznie)", expanded=False):
                 st.text(note_text)
         else:
-            st.code(source_json or "_brak_")
+            st.code(resolved.source_json or "_brak_")
 
         with st.expander("📄 Surowa transkrypcja", expanded=False):
             st.write(visit.get("raw_transcript") or "_brak_")

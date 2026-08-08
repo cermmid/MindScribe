@@ -32,6 +32,9 @@ ADDED_COLUMNS = {
     "estimated_cost_usd": "REAL DEFAULT 0.0",
     "visit_label": "TEXT",
     "visit_type": "TEXT",
+    # Był w SCHEMA, ale nie tutaj — baza założona przed jego dodaniem nigdy go nie
+    # dostawała, więc filtrowanie po lekarzu wywalałoby się na „no such column".
+    "doctor_id": "TEXT",
 }
 
 
@@ -87,15 +90,29 @@ def insert_visit(
         return cur.lastrowid
 
 
-def usage_totals() -> dict[str, float]:
+def _owner_clause(doctor_id: str | None, *, prefix: str) -> tuple[str, list[Any]]:
+    """Warunek własności wiersza.
+
+    `doctor_id=None` oznacza „bez filtrowania" i zachowuje zachowanie sprzed
+    wprowadzenia separacji per lekarz. Faza B planu przełącza wywołania na
+    przekazywanie realnego identyfikatora — wtedy każdy widzi wyłącznie swoje wizyty.
+    """
+    if doctor_id is None:
+        return "", []
+    return f"{prefix} doctor_id = ?", [doctor_id]
+
+
+def usage_totals(doctor_id: str | None = None) -> dict[str, float]:
+    where, params = _owner_clause(doctor_id, prefix="WHERE")
     with _conn() as c:
         row = c.execute(
-            """SELECT COUNT(*) AS n,
-                      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                      COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                      COALESCE(SUM(total_tokens),  0) AS total_tokens,
-                      COALESCE(SUM(estimated_cost_usd), 0.0) AS estimated_cost_usd
-               FROM visits"""
+            f"""SELECT COUNT(*) AS n,
+                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                       COALESCE(SUM(total_tokens),  0) AS total_tokens,
+                       COALESCE(SUM(estimated_cost_usd), 0.0) AS estimated_cost_usd
+                FROM visits {where}""",
+            params,
         ).fetchone()
         return dict(row)
 
@@ -105,39 +122,51 @@ def update_visit(
     *,
     doctor_note_corrected_json: str,
     status: str = "approved",
+    doctor_id: str | None = None,
 ) -> None:
+    owner, owner_params = _owner_clause(doctor_id, prefix="AND")
     with _conn() as c:
         c.execute(
-            "UPDATE visits SET doctor_note_corrected_json = ?, status = ? WHERE id = ?",
-            (doctor_note_corrected_json, status, visit_id),
+            f"UPDATE visits SET doctor_note_corrected_json = ?, status = ? WHERE id = ? {owner}",
+            [doctor_note_corrected_json, status, visit_id, *owner_params],
         )
 
 
-def get_visit(visit_id: int) -> dict[str, Any] | None:
+def get_visit(visit_id: int, doctor_id: str | None = None) -> dict[str, Any] | None:
+    owner, owner_params = _owner_clause(doctor_id, prefix="AND")
     with _conn() as c:
-        row = c.execute("SELECT * FROM visits WHERE id = ?", (visit_id,)).fetchone()
+        row = c.execute(
+            f"SELECT * FROM visits WHERE id = ? {owner}",
+            [visit_id, *owner_params],
+        ).fetchone()
         return dict(row) if row else None
 
 
-def list_visits() -> list[dict[str, Any]]:
+def list_visits(doctor_id: str | None = None) -> list[dict[str, Any]]:
+    where, params = _owner_clause(doctor_id, prefix="WHERE")
     with _conn() as c:
         rows = c.execute(
-            """SELECT id, created_at, visit_label, visit_type, status, pipeline, doctor_id,
-                      prompt_tokens, output_tokens, total_tokens, estimated_cost_usd
-               FROM visits ORDER BY id DESC"""
+            f"""SELECT id, created_at, visit_label, visit_type, status, pipeline, doctor_id,
+                       prompt_tokens, output_tokens, total_tokens, estimated_cost_usd
+                FROM visits {where} ORDER BY id DESC""",
+            params,
         ).fetchall()
         return [dict(r) for r in rows]
 
 
-def get_approved_examples(limit: int = FEW_SHOT_LIMIT) -> list[dict[str, str]]:
+def get_approved_examples(
+    limit: int = FEW_SHOT_LIMIT,
+    doctor_id: str | None = None,
+) -> list[dict[str, str]]:
+    owner, owner_params = _owner_clause(doctor_id, prefix="AND")
     with _conn() as c:
         rows = c.execute(
-            """SELECT raw_transcript, doctor_note_corrected_json
-               FROM visits
-               WHERE status = 'approved' AND doctor_note_corrected_json IS NOT NULL
-               ORDER BY id DESC
-               LIMIT ?""",
-            (limit,),
+            f"""SELECT raw_transcript, doctor_note_corrected_json
+                FROM visits
+                WHERE status = 'approved' AND doctor_note_corrected_json IS NOT NULL {owner}
+                ORDER BY id DESC
+                LIMIT ?""",
+            [*owner_params, limit],
         ).fetchall()
         return [
             {"raw_transcript": r["raw_transcript"] or "", "note_json": r["doctor_note_corrected_json"]}

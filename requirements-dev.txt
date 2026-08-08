@@ -1,0 +1,4 @@
+# Zależności tylko do developmentu i testów — NIE instalowane na hostingu.
+-r requirements.txt
+pytest>=8.0
+pyflakes>=3.0
