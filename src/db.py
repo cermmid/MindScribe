@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .config import DB_PATH, FEW_SHOT_LIMIT
@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS visits (
     prompt_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
     total_tokens INTEGER DEFAULT 0,
-    estimated_cost_usd REAL DEFAULT 0.0
+    estimated_cost_usd REAL DEFAULT 0.0,
+    prompt_audio_tokens INTEGER DEFAULT 0,
+    audio_duration_seconds REAL
 );
 """
 
@@ -35,6 +37,9 @@ ADDED_COLUMNS = {
     # Był w SCHEMA, ale nie tutaj — baza założona przed jego dodaniem nigdy go nie
     # dostawała, więc filtrowanie po lekarzu wywalałoby się na „no such column".
     "doctor_id": "TEXT",
+    # Zapisywany od iteracji 5, żeby dało się liczyć długość wizyty bez zgadywania.
+    "prompt_audio_tokens": "INTEGER DEFAULT 0",
+    "audio_duration_seconds": "REAL",
 }
 
 
@@ -63,6 +68,7 @@ def insert_visit(
     visit_label: str | None = None,
     visit_type: str | None = None,
     usage: dict | None = None,
+    audio_duration_seconds: float | None = None,
 ) -> int:
     usage = usage or {}
     with _conn() as c:
@@ -70,10 +76,11 @@ def insert_visit(
             """INSERT INTO visits
                (created_at, audio_path, pipeline, raw_transcript, ai_note_original_json,
                 status, doctor_id, visit_label, visit_type,
-                prompt_tokens, output_tokens, total_tokens, estimated_cost_usd)
-               VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)""",
+                prompt_tokens, output_tokens, total_tokens, estimated_cost_usd,
+                prompt_audio_tokens, audio_duration_seconds)
+               VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                datetime.utcnow().isoformat(timespec="seconds"),
+                datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 audio_path,
                 pipeline,
                 raw_transcript,
@@ -85,6 +92,8 @@ def insert_visit(
                 int(usage.get("output_tokens", 0)),
                 int(usage.get("total_tokens", 0)),
                 float(usage.get("estimated_cost_usd", 0.0)),
+                int(usage.get("prompt_audio_tokens", 0) if usage.get("modality_known") else 0),
+                audio_duration_seconds,
             ),
         )
         return cur.lastrowid
@@ -150,6 +159,59 @@ def list_visits(doctor_id: str | None = None) -> list[dict[str, Any]]:
                        prompt_tokens, output_tokens, total_tokens, estimated_cost_usd
                 FROM visits {where} ORDER BY id DESC""",
             params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# --- Agregaty dla panelu właściciela ------------------------------------------
+#
+# UWAGA: te zapytania celowo NIE selektują `raw_transcript`, `ai_note_original_json`,
+# `doctor_note_corrected_json` ani `visit_label`. Właściciel aplikacji nie jest lekarzem
+# prowadzącym tych pacjentów, więc wgląd w treść wizyty byłby udostępnieniem
+# dokumentacji medycznej osobie nieuprawnionej. Wyłącznie metadane i agregaty.
+
+
+def admin_user_stats() -> list[dict[str, Any]]:
+    """Statystyki per lekarz: liczba wizyt, czas, koszt, ostatnia aktywność."""
+    with _conn() as c:
+        rows = c.execute(
+            """SELECT COALESCE(doctor_id, '(nieznany)') AS doctor,
+                      COUNT(*)                                  AS visits,
+                      SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved,
+                      COALESCE(SUM(audio_duration_seconds), 0.0) AS measured_seconds,
+                      COALESCE(SUM(prompt_audio_tokens), 0)      AS audio_tokens,
+                      COALESCE(SUM(estimated_cost_usd), 0.0)     AS cost_usd,
+                      MAX(created_at)                            AS last_activity
+               FROM visits
+               GROUP BY COALESCE(doctor_id, '(nieznany)')
+               ORDER BY visits DESC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def admin_daily_stats() -> list[dict[str, Any]]:
+    """Wizyty i koszty dzień po dniu — do wykresu w panelu."""
+    with _conn() as c:
+        rows = c.execute(
+            """SELECT date(created_at)                       AS day,
+                      COUNT(*)                               AS visits,
+                      COALESCE(SUM(estimated_cost_usd), 0.0) AS cost_usd
+               FROM visits
+               GROUP BY date(created_at)
+               ORDER BY day"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def admin_visit_durations() -> list[dict[str, Any]]:
+    """Per-wizyta: czas i koszt, bez żadnej treści. Do tabeli szczegółowej w panelu."""
+    with _conn() as c:
+        rows = c.execute(
+            """SELECT id, created_at, COALESCE(doctor_id, '(nieznany)') AS doctor,
+                      visit_type, status,
+                      audio_duration_seconds, prompt_audio_tokens, estimated_cost_usd
+               FROM visits
+               ORDER BY id DESC"""
         ).fetchall()
         return [dict(r) for r in rows]
 

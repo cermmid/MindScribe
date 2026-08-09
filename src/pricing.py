@@ -15,6 +15,47 @@ def usd_to_pln(usd: float, rate: float) -> float:
     return float(usd) * float(rate)
 
 
+# Gemini tokenizuje audio ze stałą częstotliwością — stąd da się z tokenów odtworzyć
+# przybliżoną długość nagrania.
+AUDIO_TOKENS_PER_SECOND = 32
+
+# Poniżej tego progu szacunek jest bezwartościowy: narzut tekstowy promptu (system
+# prompt, schemat, few-shot) to rząd 1-3 tys. tokenów, więc przy krótkim nagraniu
+# dominuje wynik. Przy realnej wizycie stanowi kilka procent i jest do przyjęcia.
+_MIN_TRUSTWORTHY_SECONDS = 300
+
+
+def estimate_audio_seconds(
+    audio_tokens: int | None,
+    *,
+    modality_known: bool = True,
+    tokens_per_second: int = AUDIO_TOKENS_PER_SECOND,
+) -> float | None:
+    """Przybliżona długość nagrania z liczby tokenów audio.
+
+    Zwraca `None`, gdy szacunek byłby niewiarygodny — brak danych, brak rozbicia
+    modalności (wtedy liczba zawiera też tekst promptu) albo wynik poniżej progu.
+    Wołający ma pokazać „—", a nie zmyśloną wartość.
+    """
+    if not audio_tokens or audio_tokens <= 0 or not modality_known:
+        return None
+    seconds = float(audio_tokens) / float(tokens_per_second)
+    if seconds < _MIN_TRUSTWORTHY_SECONDS:
+        return None
+    return round(seconds, 1)
+
+
+def format_duration(seconds: float | None) -> str:
+    """Sekundy → „1 h 23 min" / „14 min" / „—"."""
+    if not seconds or seconds <= 0:
+        return "—"
+    total_minutes = int(round(seconds / 60))
+    hours, minutes = divmod(total_minutes, 60)
+    if hours:
+        return f"{hours} h {minutes} min"
+    return f"{minutes} min"
+
+
 def _modality_breakdown(prompt_details) -> dict[str, int]:
     """Convert SDK's prompt_tokens_details (list of ModalityTokenCount) -> {modality: count}."""
     out: dict[str, int] = {}

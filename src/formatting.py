@@ -113,6 +113,7 @@ def note_to_text(
 
 
 # Polskie nazwy kolumn dla widoku Historii. Kolejność = porządek kluczy w słowniku.
+# Świadomie BEZ tokenów i kosztu — lekarz ich nie widzi, są tylko w panelu właściciela.
 _COLUMN_RENAME: dict[str, str] = {
     "id": "numer",
     "visit_label": "nazwa wizyty",
@@ -121,15 +122,11 @@ _COLUMN_RENAME: dict[str, str] = {
     "doctor_id": "lekarz",
     "status": "status",
     "pipeline": "tryb",
-    "prompt_tokens": "tokeny wejście",
-    "output_tokens": "tokeny wyjście",
-    "total_tokens": "tokeny razem",
-    "estimated_cost_usd": "szacowany koszt (PLN)",
 }
 
 
-def humanize_visits_df(visits: list[dict[str, Any]], usd_pln: float) -> pd.DataFrame:
-    """Tabela wizyt z polskimi nagłówkami, w ustalonej kolejności, z kosztem w PLN."""
+def humanize_visits_df(visits: list[dict[str, Any]]) -> pd.DataFrame:
+    """Tabela wizyt z polskimi nagłówkami, w ustalonej kolejności."""
     if not visits:
         return pd.DataFrame(columns=list(_COLUMN_RENAME.values()))
 
@@ -138,8 +135,6 @@ def humanize_visits_df(visits: list[dict[str, Any]], usd_pln: float) -> pd.DataF
         df["created_at"] = df["created_at"].astype(str).str.replace("T", " ").str[:16]
     if "visit_type" in df.columns:
         df["visit_type"] = df["visit_type"].apply(visit_type_label)
-    if "estimated_cost_usd" in df.columns:
-        df["estimated_cost_usd"] = (df["estimated_cost_usd"].astype(float) * float(usd_pln)).round(4)
 
     keep = [c for c in _COLUMN_RENAME if c in df.columns]
     return df[keep].rename(columns=_COLUMN_RENAME)

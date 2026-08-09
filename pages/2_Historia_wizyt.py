@@ -3,10 +3,8 @@ import json
 import streamlit as st
 
 from src.auth import require_password
-from src.db import get_visit, list_visits, usage_totals
+from src.db import get_visit, list_visits
 from src.formatting import display_name, humanize_visits_df, note_to_text
-from src.nbp import get_usd_pln_rate
-from src.pricing import usd_to_pln
 from src.services import resolve_note_version
 from src.ui import copy_button, render_note
 
@@ -19,23 +17,11 @@ if not visits:
     st.info("Brak zapisanych wizyt. Przejdź do **Nowa wizyta**, żeby wygenerować pierwszą notatkę.")
     st.stop()
 
-usd_pln, rate_source = get_usd_pln_rate()
-totals = usage_totals()
-total_pln = usd_to_pln(float(totals["estimated_cost_usd"]), usd_pln)
-
-t1, t2, t3, t4 = st.columns(4)
-t1.metric("Wizyt łącznie", int(totals["n"]))
-t2.metric("Tokeny wejściowe", f"{int(totals['prompt_tokens']):,}".replace(",", " "))
-t3.metric("Tokeny wyjściowe", f"{int(totals['output_tokens']):,}".replace(",", " "))
-t4.metric("Szacowany koszt łącznie", f"{total_pln:.4f} zł")
-st.caption(
-    f"Koszt to **szacunek** wg stawek z `src/pricing.py` (Gemini 2.5 Flash), "
-    f"przeliczony kursem USD/PLN **{usd_pln:.4f}** ({rate_source}). "
-    "Realny rachunek sprawdzisz w Google Cloud Billing."
-)
+# Koszty i zużycie tokenów są celowo poza widokiem lekarza — patrz admin/app.py.
+st.metric("Wizyt łącznie", len(visits))
 
 st.dataframe(
-    humanize_visits_df(visits, usd_pln),
+    humanize_visits_df(visits),
     use_container_width=True,
     hide_index=True,
 )

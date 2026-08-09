@@ -79,6 +79,37 @@ Każdy push do tego brancha automatycznie redeployuje apkę.
 - **~1 GB RAM, 1 CPU**. Wystarczy dla jednego lekarza i plików do ~200 MB.
 - **Brak BAA z Google**. ZERO realnych danych pacjentów na tym deploy'u. Fikcyjne nagrania tylko.
 
+## Panel właściciela (koszty i statystyki)
+
+Lekarze **nie widzą** kosztów ani zużycia tokenów — te dane są dalej zbierane i zapisywane, ale pokazywane wyłącznie w osobnej aplikacji:
+
+```bash
+streamlit run admin/app.py
+```
+
+Panel wymaga sekretu `admin_password` (innego niż `app_password` lekarzy) i pokazuje:
+
+- podsumowanie: liczba lekarzy, wizyt, łączny czas nagrań, koszt w PLN i średni koszt wizyty,
+- tabelę per lekarz: liczba wizyt, łączny i średni czas, koszt, ostatnia aktywność,
+- wykresy dzienne: liczba wizyt i koszt,
+- listę wizyt pojedynczo — **wyłącznie metadane**.
+
+### Czego panel nie pokazuje i dlaczego
+
+Zapytania w `admin_user_stats()`, `admin_daily_stats()` i `admin_visit_durations()` celowo **nie selektują** `raw_transcript`, `ai_note_original_json`, `doctor_note_corrected_json` ani `visit_label`.
+
+Właściciel aplikacji nie jest lekarzem prowadzącym tych pacjentów — wgląd w treść wizyty byłby udostępnieniem dokumentacji medycznej osobie nieuprawnionej. Liczba wizyt, czas trwania i koszt to dane operacyjne i te są w porządku. Nie usuwaj tego ograniczenia bez konsultacji z IOD.
+
+### Skąd bierze się „czas wizyty"
+
+Kolejność źródeł: **zmierzony** czas nagrania (kolumna `audio_duration_seconds`), a gdy go brak — **szacunek** z liczby tokenów audio (Gemini tokenizuje audio ze stałą częstotliwością ~32 tokeny/s).
+
+Szacunek jest oznaczony w panelu i celowo **nie pojawia się dla nagrań krótszych niż 5 minut**: narzut tekstowy promptu (system prompt, schemat, few-shot) to 1–3 tys. tokenów, co przy krótkim nagraniu dominuje wynik. Przy realnej 30-minutowej wizycie ten sam narzut to kilka procent i jest do przyjęcia.
+
+Aplikacja mobilna (PWA) będzie znała dokładny czas nagrywania, więc z czasem szacunek przestanie być potrzebny.
+
+⚠️ **Panel jako osobna aplikacja wymaga wspólnej bazy.** Przy obecnym SQLite na dysku kontenera druga aplikacja na Streamlit Cloud dostanie własny, pusty plik. Lokalnie działa od razu; wdrożenie osobno ma sens dopiero po migracji na Postgresa.
+
 ## Włączenie Vertex AI (10–15 min)
 
 Vertex AI w Google Cloud nie wykorzystuje danych klienta do trenowania modeli publicznych — w przeciwieństwie do darmowego tieru Gemini API. To pierwszy krok w stronę użycia z realnymi pacjentami (ale nie jedyny — patrz checklista poniżej).

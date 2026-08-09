@@ -3,8 +3,6 @@ import streamlit as st
 
 from src.auth import current_doctor, require_password
 from src.formatting import note_to_text
-from src.nbp import get_usd_pln_rate
-from src.pricing import usd_to_pln
 from src.services import (
     DEFAULT_AUDIO_SUFFIX,
     approve_note,
@@ -77,27 +75,8 @@ if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is 
     st.session_state["current_usage"] = created.usage
     st.success(f"Wizyta #{created.visit_id} zapisana jako draft.")
 
-if "current_usage" in st.session_state:
-    u = st.session_state["current_usage"]
-    usd_pln, rate_source = get_usd_pln_rate()
-    cost_pln = usd_to_pln(u["estimated_cost_usd"], usd_pln)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Tokeny wejściowe", f"{u['prompt_tokens']:,}".replace(",", " "))
-    m2.metric("Tokeny wyjściowe", f"{u['output_tokens']:,}".replace(",", " "))
-    m3.metric("Razem", f"{u['total_tokens']:,}".replace(",", " "))
-    m4.metric("Szacowany koszt", f"{cost_pln:.4f} zł")
-    _modality_note = (
-        f"audio {u.get('prompt_audio_tokens', 0):,} · tekst {u.get('prompt_text_tokens', 0):,}"
-        if u.get("modality_known")
-        else f"całość {u.get('prompt_tokens', 0):,} liczona po stawce audio (brak rozbicia z API)"
-    )
-    _thoughts = u.get("thoughts_tokens", 0)
-    _thoughts_note = f" · myślenie {_thoughts:,}" if _thoughts else ""
-    st.caption(
-        f"Kurs USD/PLN **{usd_pln:.4f}** ({rate_source}); w USD: ${u['estimated_cost_usd']:.4f}. "
-        f"Wejście: {_modality_note} tokenów. Wyjście: {u.get('output_tokens', 0):,}{_thoughts_note} tokenów. "
-        "Szacunek — sprawdź realny rachunek w Google Cloud Billing."
-    )
+# Zużycie tokenów i koszt są dalej zapisywane do bazy, ale świadomie NIE pokazywane
+# lekarzowi — to dane biznesowe właściciela, widoczne w osobnym panelu (admin/app.py).
 
 # --- 4. HITL: edycja -----------------------------------------------------------
 if "current_note" in st.session_state:

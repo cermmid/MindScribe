@@ -7,6 +7,7 @@ i `pages/2_Historia_wizyt.py`, i które łatwo zgubić przy przepisywaniu na Fas
 import pytest
 from pydantic import ValidationError
 
+from src.pricing import estimate_audio_seconds, format_duration
 from src.services import (
     build_corrected_note,
     clean_icd_rows,
@@ -14,6 +15,36 @@ from src.services import (
     resolve_note_version,
     split_lines,
 )
+
+
+class TestEstimateAudioSeconds:
+    def test_estimates_from_audio_tokens(self):
+        """32 tokeny na sekundę: 57 600 tokenów to pół godziny."""
+        assert estimate_audio_seconds(57_600) == 1800.0
+
+    def test_none_when_no_data(self):
+        assert estimate_audio_seconds(0) is None
+        assert estimate_audio_seconds(None) is None
+
+    def test_none_when_modality_unknown(self):
+        """Bez rozbicia modalności liczba zawiera też prompt tekstowy — nie wolno zgadywać."""
+        assert estimate_audio_seconds(57_600, modality_known=False) is None
+
+    def test_none_below_trust_threshold(self):
+        """Krótkie nagranie: narzut tekstu promptu dominuje, więc lepiej nie pokazywać nic."""
+        assert estimate_audio_seconds(3_840) is None  # ~2 minuty
+
+
+class TestFormatDuration:
+    def test_minutes(self):
+        assert format_duration(840) == "14 min"
+
+    def test_hours_and_minutes(self):
+        assert format_duration(4980) == "1 h 23 min"
+
+    def test_missing(self):
+        assert format_duration(None) == "—"
+        assert format_duration(0) == "—"
 
 
 class TestDeriveAudioSuffix:
