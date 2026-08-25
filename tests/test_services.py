@@ -4,10 +4,14 @@ Chronią zachowanie, które wcześniej istniało wyłącznie w ciele `pages/1_No
 i `pages/2_Historia_wizyt.py`, i które łatwo zgubić przy przepisywaniu na FastAPI.
 """
 
+import io
+import wave
+from array import array
+
 import pytest
 from pydantic import ValidationError
 
-from src.audio import resolve_audio_mime
+from src.audio import looks_silent, resolve_audio_mime
 from src.formatting import (
     audio_quality_label,
     audio_unusable,
@@ -164,6 +168,46 @@ class TestBuildCorrectedNote:
     def test_missing_required_field_raises(self):
         with pytest.raises(ValidationError):
             build_corrected_note(**self._valid_kwargs(status_psychiczny=None))
+
+
+def _wav_bytes(samples: list[int], *, framerate: int = 16000) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(framerate)
+        w.writeframes(array("h", samples).tobytes())
+    return buf.getvalue()
+
+
+class TestLooksSilent:
+    """Wykrywanie martwego mikrofonu — przeglądarka nagrywa, ale nie dostaje sygnału."""
+
+    def test_empty_payload_is_silent(self):
+        assert looks_silent(b"") is True
+
+    def test_tiny_payload_is_silent(self):
+        assert looks_silent(b"RIFF" + b"\x00" * 100) is True
+
+    def test_wav_of_pure_zeros_is_silent(self):
+        assert looks_silent(_wav_bytes([0] * 16000)) is True
+
+    def test_wav_with_speech_level_audio_is_not_silent(self):
+        loud = [12000 if i % 2 else -12000 for i in range(16000)]
+        assert looks_silent(_wav_bytes(loud)) is False
+
+    def test_faint_background_noise_still_counts_as_silent(self):
+        """Kilka jednostek szumu kwantyzacji to nadal martwy mikrofon."""
+        assert looks_silent(_wav_bytes([1, -1] * 8000)) is True
+
+    def test_quiet_but_real_speech_passes(self):
+        """Cicha mowa musi przejść — próg nie może blokować normalnego nagrania."""
+        quiet = [400 if i % 2 else -400 for i in range(16000)]
+        assert looks_silent(_wav_bytes(quiet)) is False
+
+    def test_undecodable_container_judged_only_by_size(self):
+        """Webm/mp4 nie dekodujemy — lepiej przepuścić niż zablokować dobre nagranie."""
+        assert looks_silent(b"\x1aE\xdf\xa3" + b"\x00" * 50_000, "audio/webm") is False
 
 
 class TestResolveAudioMime:

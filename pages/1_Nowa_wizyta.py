@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 
+from src.audio import looks_silent
 from src.auth import current_doctor, require_password
 from src.formatting import (
     audio_quality_label,
@@ -68,7 +69,29 @@ elif uploaded is not None:
 # --- 3. Generacja notatki ------------------------------------------------------
 st.header("3. Generacja notatki")
 
-if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is None):
+# Cisza w nagraniu = model nie ma czego transkrybować. Sprawdzamy PRZED wysyłką,
+# żeby nie płacić za pustą notatkę i żeby lekarz od razu wiedział, że to mikrofon.
+_silent = audio_bytes is not None and looks_silent(audio_bytes, audio_mime)
+_force = False
+if _silent:
+    st.error(
+        "🔇 **W nagraniu nie ma dźwięku.** Przeglądarka nagrywała, ale nie dostała sygnału "
+        "z mikrofonu — jeśli podczas nagrywania wykres się nie ruszał, to jest właśnie ta sytuacja.\n\n"
+        "Najczęstsze przyczyny (po kolei):\n"
+        "1. **Windows blokuje mikrofon przeglądarce** — Ustawienia → Prywatność i zabezpieczenia → "
+        "Mikrofon → włącz *Zezwalaj aplikacjom klasycznym na dostęp do mikrofonu*. "
+        "Uprawnienie w przeglądarce może być przyznane, a system i tak podaje ciszę.\n"
+        "2. **Przeglądarka używa innego urządzenia** niż testowane w Windows — kliknij ikonę "
+        "kłódki/mikrofonu przy adresie strony i wybierz właściwy mikrofon.\n"
+        "3. **Inna aplikacja trzyma mikrofon** (Teams, Zoom, Discord) — zamknij ją i odśwież stronę."
+    )
+    _force = st.checkbox("Wyślij mimo to (jeśli uważasz, że nagranie jest dobre)")
+
+if st.button(
+    "🪄 Wygeneruj notatkę",
+    type="primary",
+    disabled=audio_bytes is None or (_silent and not _force),
+):
     few_shot = load_few_shot_examples()
     with st.spinner(f"Gemini analizuje nagranie (few-shot z {len(few_shot)} zatwierdzonych notatek)…"):
         try:
