@@ -17,7 +17,13 @@ from typing import Any, Iterable, Mapping
 
 from .audio import save_uploaded_audio
 from .db import get_approved_examples, get_visit, insert_visit, update_visit
-from .schemas import ICDCode, PsychiatricNote, RyzykoSamobojcze
+from .schemas import (
+    ICDCode,
+    JakoscNagrania,
+    Klasyfikacja,
+    PsychiatricNote,
+    RyzykoSamobojcze,
+)
 
 # `gemini_client` ciągnie za sobą cały SDK Google, więc importujemy go leniwie —
 # czyste reguły walidacji z tego modułu dają się wtedy testować bez SDK.
@@ -104,13 +110,19 @@ def create_visit_from_audio(
     audio_bytes: bytes,
     *,
     audio_suffix: str = DEFAULT_AUDIO_SUFFIX,
+    audio_mime: str | None = None,
     visit_label: str | None = None,
     visit_type: str | None = None,
     doctor_id: str | None = None,
     few_shot: list[dict[str, str]] | None = None,
     pipeline: str = "multimodal",
+    klasyfikacja: str = "ICD-10",
 ) -> CreatedVisit:
     """Pełna ścieżka: zapis audio → few-shot → Gemini → zapis wizyty jako draft.
+
+    `audio_mime` to typ zgłoszony przez przeglądarkę. Przekazuj go zawsze, gdy jest
+    dostępny — bez niego zgadujemy z rozszerzenia, a przy nagraniu z mikrofonu
+    rozszerzenie bywa nieprawdziwe.
 
     Wyjątki z wywołania Gemini są propagowane — wołający decyduje, jak je pokazać.
     """
@@ -123,7 +135,9 @@ def create_visit_from_audio(
         few_shot = load_few_shot_examples(doctor_id)
 
     audio_path: Path = save_uploaded_audio(audio_bytes, suffix=audio_suffix)
-    note, debug_prompt, usage = generate_note_from_audio(audio_path, few_shot)
+    note, debug_prompt, usage = generate_note_from_audio(
+        audio_path, few_shot, mime_type=audio_mime, klasyfikacja=klasyfikacja
+    )
 
     visit_id = insert_visit(
         audio_path=str(audio_path),
@@ -154,24 +168,28 @@ def build_corrected_note(
     ryzyko_samobojcze_opis: str = "",
     status_psychiczny: str,
     objawy: Iterable[str],
-    kody_icd10: Iterable[Mapping[str, Any]] | Iterable[ICDCode],
+    kody_icd: Iterable[Mapping[str, Any]] | Iterable[ICDCode],
     zalecenia: Iterable[str],
     podsumowanie: str,
+    klasyfikacja: str = "ICD-10",
+    jakosc_nagrania: str = "DOBRA",
 ) -> PsychiatricNote:
     """Zbuduj i zwaliduj poprawioną notatkę. Rzuca `ValidationError`, gdy dane są złe."""
-    icd_list = list(kody_icd10)
+    icd_list = list(kody_icd)
     codes = (
         icd_list
         if icd_list and isinstance(icd_list[0], ICDCode)
         else clean_icd_rows(icd_list)  # type: ignore[arg-type]
     )
     return PsychiatricNote(
+        jakosc_nagrania=JakoscNagrania(jakosc_nagrania),
         raw_transcript=raw_transcript,
+        klasyfikacja=Klasyfikacja(klasyfikacja),
         ryzyko_samobojcze=RyzykoSamobojcze(ryzyko_samobojcze),
         ryzyko_samobojcze_opis=(ryzyko_samobojcze_opis or "").strip(),
         status_psychiczny=status_psychiczny,
         objawy=[s for s in (str(o).strip() for o in objawy) if s],
-        kody_icd10=list(codes),
+        kody_icd=list(codes),
         zalecenia=[s for s in (str(z).strip() for z in zalecenia) if s],
         podsumowanie=podsumowanie,
     )

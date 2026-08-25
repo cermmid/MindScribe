@@ -4,9 +4,10 @@ Funkcje są tolerancyjne — czytają przez .get() z domyślnymi wartościami, w
 na starszych zatwierdzonych notatkach sprzed dodania pola ryzyka samobójczego.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pandas as pd
+if TYPE_CHECKING:  # pandas jest potrzebny wyłącznie dla tabeli Streamlita (patrz niżej)
+    import pandas as pd
 
 
 def visit_type_label(visit_type: str | None) -> str:
@@ -28,6 +29,33 @@ def display_name(visit: dict[str, Any]) -> str:
     if label:
         name += f" — {label}"
     return name
+
+
+def get_icd_codes(note: dict[str, Any]) -> list[dict[str, Any]]:
+    """Kody rozpoznań, tolerancyjnie wobec notatek sprzed dodania wyboru ICD-11.
+
+    Starsze notatki mają klucz `kody_icd10`, nowe `kody_icd`.
+    """
+    return note.get("kody_icd") or note.get("kody_icd10") or []
+
+
+def classification_label(note: dict[str, Any]) -> str:
+    """Nazwa klasyfikacji. Notatki sprzed wyboru ICD-11 są z definicji w ICD-10."""
+    return str(note.get("klasyfikacja") or "ICD-10")
+
+
+def audio_unusable(note: dict[str, Any]) -> bool:
+    """Czy model zgłosił, że w nagraniu nie było zrozumiałej mowy."""
+    return str(note.get("jakosc_nagrania", "")).upper() == "BRAK_MOWY"
+
+
+def audio_quality_label(note: dict[str, Any]) -> str | None:
+    quality = str(note.get("jakosc_nagrania", "")).upper()
+    if quality == "BRAK_MOWY":
+        return "W nagraniu nie wykryto zrozumiałej mowy — notatka może być pusta lub niepełna."
+    if quality == "SLABA":
+        return "Nagranie częściowo niezrozumiałe — sprawdź transkrypcję szczególnie uważnie."
+    return None
 
 
 def risk_is_present(note: dict[str, Any]) -> bool:
@@ -63,6 +91,11 @@ def note_to_text(
         lines.append(" · ".join(meta))
     lines.append("=" * 48)
 
+    # Ostrzeżenie o nagraniu — przed treścią, żeby nie dało się go przeoczyć.
+    if warning := audio_quality_label(note):
+        lines.append(f"!! UWAGA: {warning}")
+        lines.append("")
+
     # Ryzyko samobójcze — ZAWSZE na początku.
     lines.append(risk_line(note))
     lines.append("")
@@ -85,9 +118,9 @@ def note_to_text(
         lines.extend(f"- {o}" for o in objawy)
         lines.append("")
 
-    kody = note.get("kody_icd10") or []
+    kody = get_icd_codes(note)
     if kody:
-        lines.append("ROZPOZNANIA (ICD-10)")
+        lines.append(f"ROZPOZNANIA ({classification_label(note)})")
         for k in kody:
             code = (k.get("code") or "").strip()
             desc = (k.get("description") or "").strip()
@@ -125,8 +158,15 @@ _COLUMN_RENAME: dict[str, str] = {
 }
 
 
-def humanize_visits_df(visits: list[dict[str, Any]]) -> pd.DataFrame:
-    """Tabela wizyt z polskimi nagłówkami, w ustalonej kolejności."""
+def humanize_visits_df(visits: list[dict[str, Any]]) -> "pd.DataFrame":
+    """Tabela wizyt z polskimi nagłówkami, w ustalonej kolejności.
+
+    Jedyna funkcja w tym module wymagająca pandas — importujemy go tutaj, żeby
+    reszta (formatowanie notatki, zgodność ze starymi wpisami) działała także
+    w backendzie bez pandas. Ta funkcja i tak znika przy przejściu na PWA.
+    """
+    import pandas as pd
+
     if not visits:
         return pd.DataFrame(columns=list(_COLUMN_RENAME.values()))
 

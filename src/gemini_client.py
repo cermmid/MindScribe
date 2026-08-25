@@ -4,6 +4,7 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
+from .audio import resolve_audio_mime
 from .config import (
     GCP_LOCATION,
     GCP_PROJECT_ID,
@@ -15,15 +16,6 @@ from .config import (
 from .pricing import estimate_usage_and_cost
 from .prompts import SYSTEM_PROMPT, build_user_prompt
 from .schemas import PsychiatricNote
-
-_AUDIO_MIME = {
-    ".mp3": "audio/mpeg",
-    ".wav": "audio/wav",
-    ".m4a": "audio/mp4",
-    ".ogg": "audio/ogg",
-    ".webm": "audio/webm",
-    ".flac": "audio/flac",
-}
 
 
 def _vertex_credentials():
@@ -102,6 +94,9 @@ def _parse(response) -> PsychiatricNote:
 def generate_note_from_audio(
     audio_path: Path,
     few_shot_examples: list[dict],
+    *,
+    mime_type: str | None = None,
+    klasyfikacja: str = "ICD-10",
 ) -> tuple[PsychiatricNote, str, dict]:
     """Send audio inline (as bytes) and request a structured note.
 
@@ -109,12 +104,12 @@ def generate_note_from_audio(
     does not expose the Files API, so this is the portable path.
     """
     client = _client()
-    mime = _AUDIO_MIME.get(audio_path.suffix.lower(), "audio/mpeg")
+    mime = resolve_audio_mime(audio_path.suffix, mime_type)
     audio_part = types.Part.from_bytes(
         data=audio_path.read_bytes(),
         mime_type=mime,
     )
-    prompt = build_user_prompt(few_shot_examples, transcript=None)
+    prompt = build_user_prompt(few_shot_examples, transcript=None, klasyfikacja=klasyfikacja)
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -128,10 +123,12 @@ def generate_note_from_audio(
 def generate_note_from_text(
     transcript: str,
     few_shot_examples: list[dict],
+    *,
+    klasyfikacja: str = "ICD-10",
 ) -> tuple[PsychiatricNote, str, dict]:
     """Reserved for the future Whisper → text → Gemini pipeline."""
     client = _client()
-    prompt = build_user_prompt(few_shot_examples, transcript=transcript)
+    prompt = build_user_prompt(few_shot_examples, transcript=transcript, klasyfikacja=klasyfikacja)
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[prompt],

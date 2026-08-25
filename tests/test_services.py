@@ -7,6 +7,14 @@ i `pages/2_Historia_wizyt.py`, i które łatwo zgubić przy przepisywaniu na Fas
 import pytest
 from pydantic import ValidationError
 
+from src.audio import resolve_audio_mime
+from src.formatting import (
+    audio_quality_label,
+    audio_unusable,
+    classification_label,
+    get_icd_codes,
+    note_to_text,
+)
 from src.pricing import estimate_audio_seconds, format_duration
 from src.services import (
     build_corrected_note,
@@ -109,7 +117,7 @@ class TestBuildCorrectedNote:
             ryzyko_samobojcze_opis="  pacjent neguje  ",
             status_psychiczny="w kontakcie logicznym",
             objawy=["lęk", "  ", "bezsenność"],
-            kody_icd10=[{"code": "F41.1", "description": "Lęk", "confidence": 0.7}],
+            kody_icd=[{"code": "F41.1", "description": "Lęk", "confidence": 0.7}],
             zalecenia=["sertralina"],
             podsumowanie="wizyta kontrolna",
         )
@@ -119,7 +127,15 @@ class TestBuildCorrectedNote:
     def test_builds_valid_note(self):
         note = build_corrected_note(**self._valid_kwargs())
         assert note.ryzyko_samobojcze.value == "NIEOBECNE"
-        assert note.kody_icd10[0].code == "F41.1"
+        assert note.kody_icd[0].code == "F41.1"
+
+    def test_classification_is_recorded(self):
+        note = build_corrected_note(**self._valid_kwargs(klasyfikacja="ICD-11"))
+        assert note.klasyfikacja.value == "ICD-11"
+
+    def test_rejects_unknown_classification(self):
+        with pytest.raises(ValueError):
+            build_corrected_note(**self._valid_kwargs(klasyfikacja="ICD-9"))
 
     def test_drops_blank_symptoms(self):
         note = build_corrected_note(**self._valid_kwargs())
@@ -132,13 +148,13 @@ class TestBuildCorrectedNote:
     def test_drops_blank_icd_codes(self):
         note = build_corrected_note(
             **self._valid_kwargs(
-                kody_icd10=[
+                kody_icd=[
                     {"code": "F32.1", "confidence": 0.9},
                     {"code": "", "confidence": 0.0},
                 ]
             )
         )
-        assert len(note.kody_icd10) == 1
+        assert len(note.kody_icd) == 1
 
     def test_invalid_risk_value_raises(self):
         """Nieprawidłowa wartość ryzyka musi wysadzić budowanie — nie wolno zapisać takiej notatki."""
@@ -148,6 +164,86 @@ class TestBuildCorrectedNote:
     def test_missing_required_field_raises(self):
         with pytest.raises(ValidationError):
             build_corrected_note(**self._valid_kwargs(status_psychiczny=None))
+
+
+class TestResolveAudioMime:
+    """Najważniejsza poprawka: zły typ MIME sprawiał, że model zmyślał transkrypcję."""
+
+    def test_browser_mime_wins_over_extension(self):
+        """st.audio_input zapisuje jako .wav, ale przeglądarka może nagrać webm."""
+        assert resolve_audio_mime(".wav", "audio/webm") == "audio/webm"
+
+    def test_strips_codec_parameters(self):
+        assert resolve_audio_mime(".wav", "audio/webm;codecs=opus") == "audio/webm"
+
+    def test_accepts_video_container_for_audio_only_recording(self):
+        """Przeglądarki potrafią zwrócić video/webm dla nagrania z samym dźwiękiem."""
+        assert resolve_audio_mime(".webm", "video/webm") == "video/webm"
+
+    def test_falls_back_to_extension(self):
+        assert resolve_audio_mime(".mp3", None) == "audio/mpeg"
+        assert resolve_audio_mime(".m4a", None) == "audio/mp4"
+
+    def test_ignores_nonsense_declared_type(self):
+        assert resolve_audio_mime(".mp3", "application/octet-stream") == "audio/mpeg"
+
+    def test_unknown_extension_defaults_to_wav(self):
+        assert resolve_audio_mime(".xyz", None) == "audio/wav"
+        assert resolve_audio_mime(None, None) == "audio/wav"
+
+
+class TestBackwardCompatibility:
+    """Notatki zapisane przed dodaniem wyboru ICD-11 muszą dalej się otwierać."""
+
+    def test_reads_legacy_icd_key(self):
+        legacy = {"kody_icd10": [{"code": "F32.1", "description": "Epizod", "confidence": 0.8}]}
+        assert get_icd_codes(legacy)[0]["code"] == "F32.1"
+
+    def test_reads_new_icd_key(self):
+        current = {"kody_icd": [{"code": "6A70.1", "description": "Epizod", "confidence": 0.8}]}
+        assert get_icd_codes(current)[0]["code"] == "6A70.1"
+
+    def test_no_codes_at_all(self):
+        assert get_icd_codes({}) == []
+
+    def test_legacy_note_defaults_to_icd10(self):
+        """Notatka bez pola klasyfikacji powstała, gdy istniało tylko ICD-10."""
+        assert classification_label({}) == "ICD-10"
+
+    def test_classification_label_from_note(self):
+        assert classification_label({"klasyfikacja": "ICD-11"}) == "ICD-11"
+
+    def test_legacy_note_has_no_audio_warning(self):
+        """Stare notatki nie mają pola jakości — nie wolno straszyć fałszywym alarmem."""
+        assert audio_unusable({}) is False
+        assert audio_quality_label({}) is None
+
+
+class TestAudioQualityFlags:
+    def test_flags_unusable_recording(self):
+        note = {"jakosc_nagrania": "BRAK_MOWY"}
+        assert audio_unusable(note) is True
+        assert "nie wykryto zrozumiałej mowy" in audio_quality_label(note)
+
+    def test_flags_poor_recording_without_marking_unusable(self):
+        note = {"jakosc_nagrania": "SLABA"}
+        assert audio_unusable(note) is False
+        assert audio_quality_label(note) is not None
+
+    def test_good_recording_has_no_warning(self):
+        assert audio_quality_label({"jakosc_nagrania": "DOBRA"}) is None
+
+    def test_warning_appears_in_copyable_text(self):
+        """Ostrzeżenie musi trafić też do tekstu, który lekarz wkleja do dokumentacji."""
+        note = {
+            "jakosc_nagrania": "BRAK_MOWY",
+            "ryzyko_samobojcze": "NIEOBECNE",
+            "podsumowanie": "brak danych",
+        }
+        text = note_to_text(note, title="Wizyta #1")
+        assert "UWAGA" in text
+        # ostrzeżenie przed treścią notatki
+        assert text.index("UWAGA") < text.index("MYŚLI SAMOBÓJCZE")
 
 
 class TestResolveNoteVersion:

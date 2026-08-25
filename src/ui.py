@@ -6,13 +6,28 @@ from typing import Any
 import streamlit as st
 import streamlit.components.v1 as components
 
-from .formatting import risk_is_present, visit_type_label
+from .formatting import (
+    audio_quality_label,
+    audio_unusable,
+    classification_label,
+    get_icd_codes,
+    risk_is_present,
+    visit_type_label,
+)
 
 
 def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
     """Ładnie wyrenderuj notatkę (nagłówki, pogrubienia, czerwony alert dla ryzyka)."""
     if visit_type:
         st.caption(visit_type_label(visit_type))
+
+    # Ostrzeżenie o nagraniu idzie NAD wszystkim — jeśli model nie miał czego słuchać,
+    # lekarz musi to zobaczyć zanim przeczyta jakąkolwiek treść.
+    if warning := audio_quality_label(note):
+        if audio_unusable(note):
+            st.error(f"🔇 **{warning}**")
+        else:
+            st.warning(f"🔉 {warning}")
 
     opis = (note.get("ryzyko_samobojcze_opis") or "").strip()
     if risk_is_present(note):
@@ -33,9 +48,9 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
         for o in note["objawy"]:
             st.markdown(f"- {o}")
 
-    if note.get("kody_icd10"):
-        st.markdown("#### Rozpoznania (ICD-10)")
-        for k in note["kody_icd10"]:
+    if kody := get_icd_codes(note):
+        st.markdown(f"#### Rozpoznania ({classification_label(note)})")
+        for k in kody:
             conf = k.get("confidence")
             suffix = f" _(pewność {float(conf):.2f})_" if conf is not None else ""
             st.markdown(f"- **{k.get('code', '')}** — {k.get('description', '')}{suffix}")

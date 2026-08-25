@@ -2,7 +2,12 @@ import pandas as pd
 import streamlit as st
 
 from src.auth import current_doctor, require_password
-from src.formatting import note_to_text
+from src.formatting import (
+    audio_quality_label,
+    audio_unusable,
+    get_icd_codes,
+    note_to_text,
+)
 from src.services import (
     DEFAULT_AUDIO_SUFFIX,
     approve_note,
@@ -29,26 +34,36 @@ visit_label = st.text_input(
     ),
 )
 visit_type = st.radio("Typ wizyty", ["Pierwsza", "Kolejna"], horizontal=True)
+klasyfikacja = st.radio(
+    "Klasyfikacja rozpoznań",
+    ["ICD-10", "ICD-11"],
+    horizontal=True,
+    help="Wybierz tę, której używa Twoja przychodnia. Model poda kody wyłącznie z wybranej klasyfikacji.",
+)
 
 # --- 2. Wejście audio ----------------------------------------------------------
 st.header("2. Wejście audio")
 col_a, col_b = st.columns(2)
 with col_a:
+    recorded = st.audio_input("🎙️ Nagraj wizytę")
+with col_b:
     uploaded = st.file_uploader(
-        "Wgraj plik audio (mp3 / wav / m4a / ogg)",
+        "…albo wgraj plik audio (mp3 / wav / m4a / ogg)",
         type=["mp3", "wav", "m4a", "ogg", "webm", "flac"],
     )
-with col_b:
-    recorded = st.audio_input("…lub nagraj z mikrofonu")
 
 audio_bytes: bytes | None = None
 audio_suffix = DEFAULT_AUDIO_SUFFIX
-if uploaded is not None:
-    audio_bytes = uploaded.getvalue()
-    audio_suffix = derive_audio_suffix(uploaded.name)
-elif recorded is not None:
+audio_mime: str | None = None
+# Nagranie z mikrofonu ma pierwszeństwo — to główna ścieżka, upload jest alternatywą.
+if recorded is not None:
     audio_bytes = recorded.getvalue()
-    audio_suffix = DEFAULT_AUDIO_SUFFIX
+    audio_mime = getattr(recorded, "type", None)
+    audio_suffix = derive_audio_suffix(getattr(recorded, "name", None))
+elif uploaded is not None:
+    audio_bytes = uploaded.getvalue()
+    audio_mime = getattr(uploaded, "type", None)
+    audio_suffix = derive_audio_suffix(uploaded.name)
 
 # --- 3. Generacja notatki ------------------------------------------------------
 st.header("3. Generacja notatki")
@@ -60,10 +75,12 @@ if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is 
             created = create_visit_from_audio(
                 audio_bytes,
                 audio_suffix=audio_suffix,
+                audio_mime=audio_mime,
                 visit_label=visit_label,
                 visit_type=visit_type,
                 doctor_id=current_doctor(),
                 few_shot=few_shot,
+                klasyfikacja=klasyfikacja,
             )
         except Exception as e:
             st.error(f"Błąd wywołania Gemini: {e}")
@@ -82,6 +99,23 @@ if st.button("🪄 Wygeneruj notatkę", type="primary", disabled=audio_bytes is 
 if "current_note" in st.session_state:
     st.header("4. Edycja (Human-in-the-Loop)")
     note_data = st.session_state["current_note"]
+
+    # Jeśli model nie miał czego słuchać, lekarz musi to zobaczyć PRZED czytaniem treści.
+    if audio_unusable(note_data):
+        st.error(
+            "🔇 **W nagraniu nie wykryto zrozumiałej mowy.** "
+            "Notatka poniżej jest pusta albo szczątkowa — to poprawne zachowanie, "
+            "model ma zakaz zmyślania treści. Sprawdź mikrofon i nagraj wizytę ponownie."
+        )
+    elif warning := audio_quality_label(note_data):
+        st.warning(f"🔉 {warning}")
+
+    _transcript = (note_data.get("raw_transcript") or "").strip()
+    if not _transcript and not audio_unusable(note_data):
+        st.warning(
+            "Transkrypcja jest pusta, choć model nie zgłosił problemu z nagraniem. "
+            "Zweryfikuj nagranie przed zatwierdzeniem notatki."
+        )
 
     with st.expander("📄 Surowa transkrypcja", expanded=False):
         raw = st.text_area(
@@ -120,8 +154,10 @@ if "current_note" in st.session_state:
         height=120,
     )
 
-    st.markdown("**Proponowane kody ICD-10**")
-    icd_df = pd.DataFrame(note_data.get("kody_icd10", []) or [{"code": "", "description": "", "confidence": 0.0}])
+    st.markdown(f"**Proponowane kody {klasyfikacja}**")
+    icd_df = pd.DataFrame(
+        get_icd_codes(note_data) or [{"code": "", "description": "", "confidence": 0.0}]
+    )
     edited_icd = st.data_editor(
         icd_df,
         num_rows="dynamic",
@@ -156,9 +192,11 @@ if "current_note" in st.session_state:
                 ryzyko_samobojcze_opis=ryzyko_opis,
                 status_psychiczny=status_psychiczny,
                 objawy=split_lines(objawy_text),
-                kody_icd10=edited_icd.to_dict("records"),
+                kody_icd=edited_icd.to_dict("records"),
                 zalecenia=split_lines(zalecenia_text),
                 podsumowanie=podsumowanie,
+                klasyfikacja=klasyfikacja,
+                jakosc_nagrania=note_data.get("jakosc_nagrania", "DOBRA"),
             )
         except Exception as e:
             st.error(f"Notatka nie przeszła walidacji: {e}")
