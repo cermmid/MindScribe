@@ -11,6 +11,7 @@ from src.formatting import (
 )
 from src.services import (
     DEFAULT_AUDIO_SUFFIX,
+    VisitNotUpdated,
     approve_note,
     build_corrected_note,
     create_visit_from_audio,
@@ -297,7 +298,14 @@ if "current_note" in st.session_state:
             st.error(f"Notatka nie przeszła walidacji: {e}")
             st.stop()
 
-        approve_note(st.session_state["current_visit_id"], corrected)
+        try:
+            approve_note(st.session_state["current_visit_id"], corrected)
+        except VisitNotUpdated as e:
+            # Zapis nie doszedł do skutku — lepiej powiedzieć to wprost, niż pokazać
+            # „zatwierdzono" i pozwolić zamknąć kartę z niezapisaną notatką.
+            st.error(f"Notatka NIE została zapisana. {e}")
+            st.stop()
+
         st.session_state["approved_note"] = corrected.model_dump()
         st.session_state["approved_visit_id"] = st.session_state["current_visit_id"]
         st.session_state["approved_visit_type"] = visit_type

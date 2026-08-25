@@ -1,6 +1,8 @@
-streamlit>=1.39
+streamlit>=1.42          # 1.42+ wymagane przez st.login (OIDC)
 google-genai>=0.3
 pydantic>=2.7
 python-dotenv>=1.0
 pandas>=2.2
 requests>=2.31
+sqlalchemy>=2.0
+psycopg[binary]>=3.1

@@ -79,6 +79,36 @@ Każdy push do tego brancha automatycznie redeployuje apkę.
 - **~1 GB RAM, 1 CPU**. Wystarczy dla jednego lekarza i plików do ~200 MB.
 - **Brak BAA z Google**. ZERO realnych danych pacjentów na tym deploy'u. Fikcyjne nagrania tylko.
 
+## Baza danych
+
+Warstwa danych stoi na SQLAlchemy Core i jest przenośna między SQLite a PostgreSQL. Adres bierze się z `DATABASE_URL`:
+
+- **puste** → lokalny SQLite w `data/mindscribe.db` (development i testy działają bez serwera),
+- **connection string z Neona** → PostgreSQL. Można go wkleić dokładnie tak, jak podaje panel — prefiks `postgresql://` jest zamieniany na `postgresql+psycopg://` automatycznie.
+
+⚠️ Na Streamlit Community Cloud SQLite **znika przy każdym restarcie kontenera**, razem z wizytami. Trwała baza to warunek wieloosobowej pracy, nie ulepszenie.
+
+### Sprawdzenie migracji na własnej bazie
+
+Ta sama seria testów działa na obu silnikach — to jest dowód, że przejście na Postgresa niczego nie zmieniło:
+
+```bash
+pytest                                                   # SQLite
+TEST_DATABASE_URL='postgresql://...' pytest              # PostgreSQL
+```
+
+⚠️ Testy **czyszczą tabelę `visits`** w podanej bazie. Podawaj wyłącznie bazę testową. Dlatego jest to osobna zmienna niż `DATABASE_URL` — żeby nie dało się wyczyścić produkcji przez pomyłkę.
+
+### Rzeczy, które przy tej migracji psują się po cichu
+
+Warto o nich wiedzieć, bo żadna nie rzuca błędu:
+
+- `engine.connect()` w SQLAlchemy 2 **nie commituje** przy wyjściu z `with`, choć `sqlite3` commitował. Dlatego `_conn()` zwraca `engine.begin()` — inaczej zapisy znikałyby, a odczyty działały.
+- `cur.lastrowid` nie działa pod psycopg — `insert_visit` używa `INSERT ... RETURNING id`.
+- `date(created_at)` istnieje w SQLite, ale w Postgresie `date` to typ, nie funkcja. Grupowanie po dniu robimy w Pythonie.
+- `REAL` w Postgresie to float4 — koszt trzymamy jako `Numeric(14,6)`.
+- `SUM()` po kolumnie całkowitej zwraca `Decimal`; konwersja jest w jednym miejscu, przy odczycie wiersza.
+
 ## Weryfikacja rozpoznań w rejestrze WHO
 
 **Model językowy nie może być źródłem kodów rozpoznań.** W testach podał kody ICD-11, które *istnieją*, ale znaczą co innego niż twierdził — np. `QE80` („ofiara przestępstwa lub terroryzmu") opisane jako zaburzenia snu, czy `6A70` (pojedynczy epizod depresyjny) podane jako lęk uogólniony. Walidacja formatu tego nie wykryje, bo kody są prawdziwe. ICD-11 obowiązuje dopiero od 2022 i jest w danych treningowych nieporównanie słabiej reprezentowana niż ICD-10, więc mapowanie kod ↔ znaczenie jest u modelu niepewne.

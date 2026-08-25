@@ -118,18 +118,24 @@ class TestOwnershipFiltering:
         assert temp_db.get_approved_examples(doctor_id="user-c") == []
 
     def test_update_cannot_touch_other_owner(self, temp_db, two_users):
-        """Aktualizacja cudzej wizyty nie może jej zmienić.
-
-        UWAGA: dziś przechodzi po cichu — `update_visit` nie sprawdza `rowcount`,
-        więc wołający dostaje sukces mimo zera zmienionych wierszy. Test pilnuje
-        przynajmniej tego, że **dane cudzej wizyty pozostają nietknięte**.
-        """
+        """Aktualizacja cudzej wizyty nie może jej zmienić ani udawać sukcesu."""
         _, b = two_users
-        temp_db.update_visit(
+        changed = temp_db.update_visit(
             b, doctor_note_corrected_json='{"podsumowanie": "podmiana"}', doctor_id="user-a"
         )
+        assert changed == 0, "nietrafiony właściciel musi dać zero zmienionych wierszy"
         untouched = temp_db.get_visit(b)
         assert "podmiana" not in (untouched["doctor_note_corrected_json"] or "")
+
+    def test_update_reports_own_row_changed(self, temp_db, two_users):
+        a, _ = two_users
+        changed = temp_db.update_visit(
+            a, doctor_note_corrected_json='{"podsumowanie": "moja"}', doctor_id="user-a"
+        )
+        assert changed == 1
+
+    def test_update_of_missing_visit_reports_nothing_changed(self, temp_db):
+        assert temp_db.update_visit(999_999, doctor_note_corrected_json="{}") == 0
 
 
 class TestFailOpenDefault:
@@ -207,13 +213,11 @@ class TestMigration:
         temp_db.init_db()
         assert temp_db.get_visit(visit_id) is not None
 
-    def test_legacy_database_gains_new_columns(self, tmp_path, monkeypatch):
+    def test_legacy_database_gains_new_columns(self, sqlite_db):
         """Baza sprzed `doctor_id` i kolumn czasu ma się zmigrować bez utraty wierszy."""
         import sqlite3
 
-        from src import db as db_module
-
-        path = tmp_path / "legacy.db"
+        path, db_module = sqlite_db
         con = sqlite3.connect(path)
         con.executescript(
             """
@@ -234,7 +238,6 @@ class TestMigration:
         con.commit()
         con.close()
 
-        monkeypatch.setattr(db_module, "DB_PATH", path)
         db_module.init_db()
 
         visit = db_module.get_visit(1)

@@ -396,18 +396,30 @@ def build_corrected_note(
     )
 
 
+class VisitNotUpdated(RuntimeError):
+    """Zatwierdzenie nie zmieniło żadnego wiersza — wizyta nie istnieje albo nie należy do tej osoby."""
+
+
 def approve_note(visit_id: int, note: PsychiatricNote, *, doctor_id: str | None = None) -> None:
     """Zapisz zwalidowaną notatkę i oznacz wizytę jako zatwierdzoną.
 
     Wywoływać **wyłącznie** z obiektem, który przeszedł walidację `PsychiatricNote` —
     tylko taka notatka trafia potem do few-shot.
+
+    Rzuca `VisitNotUpdated`, gdy nic się nie zmieniło. Bez tego sprawdzenia próba
+    zatwierdzenia cudzej (albo nieistniejącej) wizyty kończyłaby się komunikatem
+    o sukcesie mimo braku zapisu — a lekarz uznałby notatkę za zachowaną.
     """
-    update_visit(
+    changed = update_visit(
         visit_id,
         doctor_note_corrected_json=note.model_dump_json(indent=2),
         status="approved",
         doctor_id=doctor_id,
     )
+    if not changed:
+        raise VisitNotUpdated(
+            f"Nie udało się zatwierdzić wizyty #{visit_id} — nie istnieje albo należy do kogoś innego."
+        )
 
 
 # --- Przypadek użycia: odczyt wizyty -------------------------------------------

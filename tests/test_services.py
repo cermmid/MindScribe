@@ -273,6 +273,53 @@ class TestBackwardCompatibility:
         assert classification_label(note) == "ICD-10 + DSM-5"
 
 
+class TestApproveNoteFailsLoudly:
+    """Zatwierdzenie, które niczego nie zmieniło, nie może meldować sukcesu."""
+
+    def _note(self):
+        return build_corrected_note(
+            raw_transcript="t",
+            ryzyko_samobojcze="NIEOBECNE",
+            status_psychiczny="ok",
+            objawy=[],
+            kody_icd=[],
+            zalecenia_terapeuty=[],
+            podsumowanie="p",
+        )
+
+    def test_raises_when_visit_does_not_exist(self, temp_db):
+        from src.services import VisitNotUpdated, approve_note
+
+        with pytest.raises(VisitNotUpdated):
+            approve_note(999_999, self._note())
+
+    def test_raises_when_visit_belongs_to_someone_else(self, temp_db):
+        from src.services import VisitNotUpdated, approve_note
+
+        visit_id = temp_db.insert_visit(
+            audio_path=None,
+            pipeline="multimodal",
+            raw_transcript="t",
+            ai_note_original_json="{}",
+            doctor_id="user-b",
+        )
+        with pytest.raises(VisitNotUpdated):
+            approve_note(visit_id, self._note(), doctor_id="user-a")
+
+    def test_succeeds_for_own_visit(self, temp_db):
+        from src.services import approve_note
+
+        visit_id = temp_db.insert_visit(
+            audio_path=None,
+            pipeline="multimodal",
+            raw_transcript="t",
+            ai_note_original_json="{}",
+            doctor_id="user-a",
+        )
+        approve_note(visit_id, self._note(), doctor_id="user-a")
+        assert temp_db.get_visit(visit_id)["status"] == "approved"
+
+
 class TestSplitRecommendations:
     """Zalecenia z wizyty muszą być oddzielone od propozycji asystenta."""
 

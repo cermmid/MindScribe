@@ -29,6 +29,25 @@ def _as_bool(v) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _database_url() -> str:
+    """Adres bazy. Bez konfiguracji — lokalny SQLite, żeby dev i testy działały bez serwera.
+
+    Neon podaje adres zaczynający się od `postgresql://`; SQLAlchemy potrzebuje jawnego
+    sterownika, więc dopisujemy `+psycopg`. Dzięki temu można wkleić string prosto
+    z panelu Neona bez ręcznych poprawek.
+    """
+    url = (os.getenv("DATABASE_URL") or _from_secrets("DATABASE_URL") or "").strip()
+    if not url:
+        return f"sqlite:///{DB_PATH}"
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    if url.startswith("postgres://"):  # starszy wariant, spotykany u niektórych dostawców
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    return url
+
+
+DATABASE_URL = _database_url()
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or _from_secrets("GEMINI_API_KEY") or ""
 GEMINI_MODEL = os.getenv("GEMINI_MODEL") or _from_secrets("GEMINI_MODEL") or "gemini-2.5-flash"
 
