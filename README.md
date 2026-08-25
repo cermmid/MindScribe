@@ -93,8 +93,13 @@ Dlatego kody przechodzą przez oficjalne API WHO:
 ### Konfiguracja (5 min)
 
 1. Załóż konto na https://icd.who.int/icdapi (darmowe).
-2. Zakładka **API Access Keys** → **Create new key**.
-3. Wpisz `ICD_CLIENT_ID` i `ICD_CLIENT_SECRET` do sekretów.
+2. Zakładka **API Access Keys** → **Create new key**. Skopiuj `Client Id` i `Client Secret`.
+3. **Sprawdź klucze zanim wrzucisz je do aplikacji:**
+   ```bash
+   ICD_CLIENT_ID=... ICD_CLIENT_SECRET=... python3 scripts/test_icd.py
+   ```
+   Skrypt pobiera token, wyszukuje rozpoznanie w ICD-11 i sprawdza kilka konkretnych kodów w ICD-11 i ICD-10. Po każdym kroku pisze, co poszło nie tak — dzięki temu wiadomo, czy problem jest w kluczach, w sieci, czy w samym API.
+4. Gdy skrypt pokazuje same ✅, wpisz `ICD_CLIENT_ID` i `ICD_CLIENT_SECRET` do sekretów aplikacji i zrestartuj ją.
 
 Bez tych kluczy aplikacja **działa normalnie**, ale każde rozpoznanie jest oznaczane jako niezweryfikowane — awaria API czy brak konfiguracji nigdy nie przerywa generowania notatki.
 
