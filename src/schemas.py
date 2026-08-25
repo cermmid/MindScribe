@@ -103,9 +103,19 @@ class _NoteBase(BaseModel):
         default_factory=list,
         description="Lista konkretnych objawów zgłoszonych lub zaobserwowanych podczas wizyty.",
     )
-    zalecenia: list[str] = Field(
+    zalecenia_terapeuty: list[str] = Field(
         default_factory=list,
-        description="Zalecenia farmakologiczne i niefarmakologiczne, dalsze badania, follow-up.",
+        description=(
+            "Zalecenia, które specjalista FAKTYCZNIE wypowiedział podczas wizyty — "
+            "wypisz tylko to, co słychać w nagraniu. Nic nie dodawaj od siebie."
+        ),
+    )
+    zalecenia_proponowane: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Twoje własne propozycje zaleceń, których w nagraniu NIE było, a które warto "
+            "rozważyć. To sugestie do decyzji specjalisty — nie mieszaj ich z tym, co padło na wizycie."
+        ),
     )
     podsumowanie: str = Field(
         description="Krótkie 2-3 zdaniowe podsumowanie wizyty."

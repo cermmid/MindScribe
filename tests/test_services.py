@@ -131,7 +131,7 @@ class TestBuildCorrectedNote:
             status_psychiczny="w kontakcie logicznym",
             objawy=["lęk", "  ", "bezsenność"],
             kody_icd=[{"code": "F41.1", "description": "Lęk", "confidence": 0.7}],
-            zalecenia=["sertralina"],
+            zalecenia_terapeuty=["sertralina"],
             podsumowanie="wizyta kontrolna",
         )
         base.update(overrides)
@@ -271,6 +271,44 @@ class TestBackwardCompatibility:
         note = {"klasyfikacje": ["ICD-10", "DSM-5"]}
         assert classifications_of(note) == ["ICD-10", "DSM-5"]
         assert classification_label(note) == "ICD-10 + DSM-5"
+
+
+class TestSplitRecommendations:
+    """Zalecenia z wizyty muszą być oddzielone od propozycji asystenta."""
+
+    def test_keeps_both_lists_separate(self):
+        note = build_corrected_note(
+            raw_transcript="t",
+            ryzyko_samobojcze="NIEOBECNE",
+            status_psychiczny="ok",
+            objawy=[],
+            kody_icd=[],
+            zalecenia_terapeuty=["sertralina 50 mg"],
+            zalecenia_proponowane=["rozważyć psychoterapię CBT"],
+            podsumowanie="p",
+        )
+        assert note.zalecenia_terapeuty == ["sertralina 50 mg"]
+        assert note.zalecenia_proponowane == ["rozważyć psychoterapię CBT"]
+
+    def test_copyable_text_marks_proposals_as_not_said(self):
+        note = {
+            "ryzyko_samobojcze": "NIEOBECNE",
+            "zalecenia_terapeuty": ["sertralina 50 mg"],
+            "zalecenia_proponowane": ["rozważyć CBT"],
+        }
+        text = note_to_text(note, title="Wizyta #1")
+        assert "ZALECENIA\n- sertralina 50 mg" in text
+        assert "PROPOZYCJE DO ROZWAŻENIA" in text
+        assert "nie padły na wizycie" in text
+        # kolejność: najpierw to, co faktycznie zalecono
+        assert text.index("ZALECENIA\n") < text.index("PROPOZYCJE")
+
+    def test_legacy_note_recommendations_still_render(self):
+        """Notatki sprzed podziału mają jedno pole `zalecenia`."""
+        note = {"ryzyko_samobojcze": "NIEOBECNE", "zalecenia": ["stara pozycja"]}
+        text = note_to_text(note, title="Wizyta #1")
+        assert "ZALECENIA\n- stara pozycja" in text
+        assert "PROPOZYCJE DO ROZWAŻENIA" not in text
 
 
 class TestGroupCodesByClassification:

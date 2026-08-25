@@ -43,7 +43,7 @@ def _require_admin_password() -> None:
         st.error(
             "Brak `admin_password` w sekretach. Panel jest zablokowany.\n\n"
             "Ustaw go w `.streamlit/secrets.toml` albo w panelu Streamlit Cloud. "
-            "Użyj **innego** hasła niż `app_password` lekarzy."
+            "Użyj **innego** hasła niż `app_password` użytkowników."
         )
         st.stop()
 
@@ -93,7 +93,7 @@ _estimated_count = sum(1 for d, est in _durations if d and est)
 total_cost_pln = usd_to_pln(sum(float(v["estimated_cost_usd"] or 0) for v in visits), usd_pln)
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Lekarzy", len(users))
+c1.metric("Specjalistów", len(users))
 c2.metric("Wizyt", len(visits))
 c3.metric("Łączny czas nagrań", format_duration(sum(_known)) if _known else "—")
 c4.metric("Koszt łącznie", f"{total_cost_pln:.2f} zł")
@@ -114,7 +114,7 @@ if _estimated_count:
     )
 
 # --- Per lekarz ----------------------------------------------------------------
-st.subheader("Lekarze")
+st.subheader("Specjaliści")
 
 _by_doctor: dict[str, list[float]] = {}
 for visit, (seconds, _) in zip(visits, _durations):
@@ -127,7 +127,7 @@ for u in users:
     total_seconds = sum(doctor_durations)
     user_rows.append(
         {
-            "lekarz": u["doctor"],
+            "specjalista": u["doctor"],
             "wizyt": int(u["visits"]),
             "zatwierdzonych": int(u["approved"]),
             "łączny czas": format_duration(total_seconds) if doctor_durations else "—",
@@ -171,7 +171,7 @@ with st.expander("📋 Wizyty pojedynczo (bez treści)", expanded=False):
             {
                 "numer": visit["id"],
                 "data": str(visit["created_at"] or "")[:16].replace("T", " "),
-                "lekarz": visit["doctor"],
+                "specjalista": visit["doctor"],
                 "typ": visit.get("visit_type") or "—",
                 "status": visit["status"],
                 "czas": format_duration(seconds) + (" (szac.)" if is_estimated else ""),
@@ -181,5 +181,5 @@ with st.expander("📋 Wizyty pojedynczo (bez treści)", expanded=False):
     st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
     st.caption(
         "Panel celowo nie pokazuje transkrypcji, treści notatek ani etykiet wizyt — "
-        "to dokumentacja medyczna dostępna wyłącznie lekarzowi prowadzącemu."
+        "to dokumentacja medyczna dostępna wyłącznie osobie prowadzącej."
     )

@@ -66,9 +66,16 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
                 if uwaga := (k.get("uwaga") or "").strip():
                     st.caption(f"　↳ {uwaga}")
 
-    if note.get("zalecenia"):
+    # Starsze notatki miały jedno pole `zalecenia`.
+    if wlasne := (note.get("zalecenia_terapeuty") or note.get("zalecenia")):
         st.markdown("#### Zalecenia")
-        for z in note["zalecenia"]:
+        for z in wlasne:
+            st.markdown(f"- {z}")
+
+    if proponowane := note.get("zalecenia_proponowane"):
+        st.markdown("#### Propozycje do rozważenia")
+        st.caption("Sugestie asystenta — nie padły podczas wizyty.")
+        for z in proponowane:
             st.markdown(f"- {z}")
 
 

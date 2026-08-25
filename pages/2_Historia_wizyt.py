@@ -41,7 +41,7 @@ with st.expander("📂 Pokaż szczegóły wizyty", expanded=False):
         st.subheader(display_name(visit))
         st.caption(
             f"Utworzono: {visit['created_at']} · status: **{visit['status']}** · "
-            f"tryb: {visit['pipeline']} · lekarz: {visit.get('doctor_id') or '_brak_'}"
+            f"tryb: {visit['pipeline']} · prowadzący: {visit.get('doctor_id') or '_brak_'}"
         )
 
         resolved = resolve_note_version(visit)
@@ -72,5 +72,5 @@ with st.expander("📂 Pokaż szczegóły wizyty", expanded=False):
             if visit.get("ai_note_original_json"):
                 st.json(json.loads(visit["ai_note_original_json"]))
             if corrected:
-                st.caption("Wersja lekarza:")
+                st.caption("Wersja po korekcie:")
                 st.json(json.loads(corrected))

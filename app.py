@@ -9,23 +9,33 @@ require_password()
 init_db()
 
 st.title("🧠 MindScribe")
-st.subheader("Asystent psychiatry — transkrypcja i ustrukturyzowana notatka z wizyty")
+st.subheader("Asystent specjalistów od zdrowia psychicznego")
 
 st.markdown(
     """
-**Workflow MVP:**
+Nagraj wizytę i odzyskaj czas, który zwykle pochłania pisanie notatki.
 
-1. **Nowa wizyta** — wgraj/nagraj audio, AI wygeneruje notatkę (status psychiczny, objawy, kody ICD-10, zalecenia).
-2. **Edytuj i zatwierdź** — naniesiesz poprawki w interfejsie HITL.
-3. **Few-shot w locie** — 3 ostatnie zatwierdzone notatki są automatycznie doklejane do kolejnego promptu,
-   więc model uczy się Twojego stylu pisania.
-4. **Historia wizyt** — przegląd zapisanych wizyt i porównanie oryginału AI z wersją lekarza.
+MindScribe słucha nagrania i przygotowuje gotowy szkic dokumentacji: opis stanu
+psychicznego, objawy, proponowane rozpoznania i zalecenia. Ty czytasz, poprawiasz
+i zatwierdzasz — ostatnie słowo zawsze należy do Ciebie.
 
-Wybierz stronę w panelu po lewej.
+**Co wyróżnia tę aplikację:**
+
+- **Myśli samobójcze zawsze na wierzchu.** Każda notatka zaczyna się od jednoznacznej
+  informacji o ryzyku — nie trzeba jej szukać w tekście.
+- **Kody rozpoznań sprawdzane u źródła.** ICD-10 i ICD-11 potwierdzamy w oficjalnym
+  rejestrze WHO, więc kod i jego znaczenie nie mogą się rozjechać. Możesz też pracować
+  na DSM-5.
+- **Uczy się Twojego stylu.** Im więcej notatek zatwierdzisz, tym bardziej kolejne
+  przypominają sposób, w jaki piszesz Ty.
+- **Nic nie jest zmyślane.** Gdy nagranie jest nieczytelne, aplikacja powie to wprost,
+  zamiast wypełniać notatkę treścią, której nie było.
+
+Zacznij od **Nowa wizyta** w panelu po lewej.
     """
 )
 
 st.info(
-    "⚠️ MVP do testów wewnętrznych. Klucze API trzymaj w `.env`. "
-    "Dla danych pacjentów produkcyjnie przełącz klienta Gemini na Vertex AI (patrz README)."
+    "⚠️ Wersja testowa. Korzystaj wyłącznie z nagrań fikcyjnych lub odegranych — "
+    "aplikacja nie jest jeszcze przygotowana do pracy z danymi prawdziwych pacjentów."
 )

@@ -1,4 +1,5 @@
-SYSTEM_PROMPT = """Jesteś doświadczonym asystentem klinicznym wspomagającym lekarza psychiatrę.
+SYSTEM_PROMPT = """Jesteś doświadczonym asystentem klinicznym wspomagającym specjalistę zdrowia psychicznego
+(psychiatrę, psychologa lub psychoterapeutę).
 Twoje zadanie: na podstawie nagrania (lub transkrypcji) wizyty psychiatrycznej w języku polskim
 przygotuj ustrukturyzowaną notatkę medyczną.
 
@@ -18,11 +19,11 @@ Pozostałe zasady:
 - KRYTYCZNE: pole `ryzyko_samobojcze` ZAWSZE wypełnij jedną z dwóch wartości — OBECNE lub NIEOBECNE.
   Wpisz OBECNE, jeśli w nagraniu pojawiają się jakiekolwiek myśli, plany, zamiary lub treści samobójcze
   (także pośrednie). Wpisz NIEOBECNE, jeśli pacjent je neguje lub nic na nie nie wskazuje. W
-  `ryzyko_samobojcze_opis` w 1-2 zdaniach uzasadnij ocenę. To informacja krytyczna dla lekarza — nie pomijaj.
+  `ryzyko_samobojcze_opis` w 1-2 zdaniach uzasadnij ocenę. To informacja krytyczna dla specjalisty — nie pomijaj.
   Gdy nagranie jest niezrozumiałe, wpisz NIEOBECNE i zaznacz w opisie, że nagranie nie pozwoliło tego ocenić.
 - Rozpoznania podawaj wyłącznie wtedy, gdy obraz kliniczny je uzasadnia; dla każdej propozycji
   oszacuj realistyczną pewność.
-- Jeśli w PRZYKŁADACH widzisz styl notatek tego konkretnego lekarza — naśladuj sposób formułowania
+- Jeśli w PRZYKŁADACH widzisz styl notatek tej konkretnej osoby — naśladuj sposób formułowania
   zdań, długość i akcenty, ale nie treść.
 """
 
@@ -33,7 +34,7 @@ def build_few_shot_block(examples: list[dict]) -> str:
         return ""
 
     blocks = [
-        "### PRZYKŁADY ZATWIERDZONYCH NOTATEK TEGO LEKARZA\n"
+        "### PRZYKŁADY ZATWIERDZONYCH NOTATEK TEJ OSOBY\n"
         "UWAGA: to są notatki z INNYCH, wcześniejszych wizyt. Służą wyłącznie jako wzorzec STYLU.\n"
         "Nie przepisuj z nich żadnej treści do nowej notatki.\n"
     ]

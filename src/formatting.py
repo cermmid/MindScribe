@@ -168,14 +168,21 @@ def note_to_text(
             )
             lines.append("")
 
-    zalecenia = note.get("zalecenia") or []
-    if zalecenia:
+    # Starsze notatki miały jedno pole `zalecenia` — traktujemy je jako zalecenia specjalisty.
+    wlasne = note.get("zalecenia_terapeuty") or note.get("zalecenia") or []
+    if wlasne:
         lines.append("ZALECENIA")
-        lines.extend(f"- {z}" for z in zalecenia)
+        lines.extend(f"- {z}" for z in wlasne)
+        lines.append("")
+
+    proponowane = note.get("zalecenia_proponowane") or []
+    if proponowane:
+        lines.append("PROPOZYCJE DO ROZWAŻENIA (od asystenta, nie padły na wizycie)")
+        lines.extend(f"- {z}" for z in proponowane)
         lines.append("")
 
     if doctor_name:
-        lines.append(f"Lekarz: {doctor_name}")
+        lines.append(f"Prowadzący: {doctor_name}")
 
     return "\n".join(lines).strip() + "\n"
 
@@ -187,7 +194,7 @@ _COLUMN_RENAME: dict[str, str] = {
     "visit_label": "nazwa wizyty",
     "created_at": "utworzona",
     "visit_type": "pierwsza czy kolejna wizyta",
-    "doctor_id": "lekarz",
+    "doctor_id": "prowadzący",
     "status": "status",
     "pipeline": "tryb",
 }

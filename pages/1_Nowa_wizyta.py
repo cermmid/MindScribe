@@ -35,18 +35,19 @@ visit_label = st.text_input(
     ),
 )
 visit_type = st.radio("Typ wizyty", ["Pierwsza", "Kolejna"], horizontal=True)
-klasyfikacje = st.multiselect(
-    "Klasyfikacje rozpoznań",
-    ["ICD-10", "ICD-11", "DSM-5"],
-    default=["ICD-10"],
-    help=(
-        "Wybierz jedną albo kilka naraz. Przy kilku to samo rozpoznanie dostanie kod "
-        "w każdym z wybranych systemów."
-    ),
-)
+st.markdown("**Klasyfikacje rozpoznań** — zaznacz jedną albo kilka naraz")
+_systems = ["ICD-10", "ICD-11", "DSM-5"]
+_cols = st.columns(len(_systems))
+klasyfikacje = [
+    system
+    for system, col in zip(_systems, _cols)
+    if col.checkbox(system, value=(system == "ICD-10"), key=f"kl_{system}")
+]
 if not klasyfikacje:
-    st.warning("Wybierz przynajmniej jedną klasyfikację.")
+    st.warning("Zaznacz przynajmniej jedną klasyfikację — użyję ICD-10.")
     klasyfikacje = ["ICD-10"]
+if len(klasyfikacje) > 1:
+    st.caption("To samo rozpoznanie dostanie kod w każdym z zaznaczonych systemów.")
 if "DSM-5" in klasyfikacje:
     st.caption(
         "ℹ️ DSM-5 wydaje Amerykańskie Towarzystwo Psychiatryczne i **nie ma publicznego "
@@ -105,7 +106,13 @@ if st.button(
     disabled=audio_bytes is None or (_silent and not _force),
 ):
     few_shot = load_few_shot_examples()
-    with st.spinner(f"Gemini analizuje nagranie (few-shot z {len(few_shot)} zatwierdzonych notatek)…"):
+    _spinner_text = "Słucham nagrania i przygotowuję notatkę… to chwilę potrwa."
+    if few_shot:
+        _spinner_text = (
+            f"Słucham nagrania i przygotowuję notatkę w Twoim stylu "
+            f"(na podstawie {len(few_shot)} wcześniej zatwierdzonych)…"
+        )
+    with st.spinner(_spinner_text):
         try:
             created = create_visit_from_audio(
                 audio_bytes,
@@ -132,7 +139,7 @@ if st.button(
 
 # --- 4. HITL: edycja -----------------------------------------------------------
 if "current_note" in st.session_state:
-    st.header("4. Edycja (Human-in-the-Loop)")
+    st.header("4. Edycja")
     note_data = st.session_state["current_note"]
 
     # Jeśli model nie miał czego słuchać, lekarz musi to zobaczyć PRZED czytaniem treści.
@@ -250,8 +257,19 @@ if "current_note" in st.session_state:
 
     zalecenia_text = st.text_area(
         "Zalecenia (jedno w linii)",
-        value="\n".join(note_data.get("zalecenia", [])),
+        value="\n".join(note_data.get("zalecenia_terapeuty") or note_data.get("zalecenia") or []),
         height=120,
+        help="To, co faktycznie zaleciłaś/zaleciłeś podczas wizyty.",
+    )
+
+    propozycje_text = st.text_area(
+        "Propozycje do rozważenia (jedna w linii)",
+        value="\n".join(note_data.get("zalecenia_proponowane") or []),
+        height=100,
+        help=(
+            "Sugestie asystenta, których nie było na wizycie. Przenieś do pola wyżej to, "
+            "co przyjmujesz, a resztę usuń."
+        ),
     )
 
     podsumowanie = st.text_area(
@@ -269,7 +287,8 @@ if "current_note" in st.session_state:
                 status_psychiczny=status_psychiczny,
                 objawy=split_lines(objawy_text),
                 kody_icd=edited_icd.to_dict("records"),
-                zalecenia=split_lines(zalecenia_text),
+                zalecenia_terapeuty=split_lines(zalecenia_text),
+                zalecenia_proponowane=split_lines(propozycje_text),
                 podsumowanie=podsumowanie,
                 klasyfikacje=klasyfikacje,
                 jakosc_nagrania=note_data.get("jakosc_nagrania", "DOBRA"),

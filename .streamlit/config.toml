@@ -3,3 +3,12 @@ maxUploadSize = 200
 
 [browser]
 gatherUsageStats = false
+
+# Ciemny motyw z tłem rozjaśnionym i nasyconym o 5 punktów procentowych względem
+# domyślnych kolorów Streamlita (#0E1117 i #262730) — policzone w przestrzeni HLS.
+[theme]
+base = "dark"
+backgroundColor = "#161C28"
+secondaryBackgroundColor = "#2E3041"
+textColor = "#FAFAFA"
+primaryColor = "#4C8BF5"
