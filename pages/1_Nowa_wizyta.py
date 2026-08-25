@@ -35,12 +35,24 @@ visit_label = st.text_input(
     ),
 )
 visit_type = st.radio("Typ wizyty", ["Pierwsza", "Kolejna"], horizontal=True)
-klasyfikacja = st.radio(
-    "Klasyfikacja rozpoznań",
-    ["ICD-10", "ICD-11"],
-    horizontal=True,
-    help="Wybierz tę, której używa Twoja przychodnia. Model poda kody wyłącznie z wybranej klasyfikacji.",
+klasyfikacje = st.multiselect(
+    "Klasyfikacje rozpoznań",
+    ["ICD-10", "ICD-11", "DSM-5"],
+    default=["ICD-10"],
+    help=(
+        "Wybierz jedną albo kilka naraz. Przy kilku to samo rozpoznanie dostanie kod "
+        "w każdym z wybranych systemów."
+    ),
 )
+if not klasyfikacje:
+    st.warning("Wybierz przynajmniej jedną klasyfikację.")
+    klasyfikacje = ["ICD-10"]
+if "DSM-5" in klasyfikacje:
+    st.caption(
+        "ℹ️ DSM-5 wydaje Amerykańskie Towarzystwo Psychiatryczne i **nie ma publicznego "
+        "rejestru**, więc jego rozpoznań nie potwierdzamy automatycznie — zostaną oznaczone "
+        "do weryfikacji. ICD-10 i ICD-11 sprawdzamy w rejestrze WHO."
+    )
 
 # --- 2. Wejście audio ----------------------------------------------------------
 st.header("2. Wejście audio")
@@ -103,7 +115,7 @@ if st.button(
                 visit_type=visit_type,
                 doctor_id=current_doctor(),
                 few_shot=few_shot,
-                klasyfikacja=klasyfikacja,
+                klasyfikacje=klasyfikacje,
             )
         except Exception as e:
             st.error(f"Błąd wywołania Gemini: {e}")
@@ -177,21 +189,23 @@ if "current_note" in st.session_state:
         height=120,
     )
 
-    st.markdown(f"**Proponowane kody {klasyfikacja}**")
+    st.markdown(f"**Proponowane rozpoznania — {' + '.join(klasyfikacje)}**")
     _codes = get_icd_codes(note_data)
     _unverified = [k for k in _codes if not k.get("zweryfikowany")]
     if _unverified:
         st.warning(
             f"⚠️ {len(_unverified)} z {len(_codes)} rozpoznań **nie zostało potwierdzonych "
-            "w rejestrze WHO** — sprawdź je ręcznie."
+            "w oficjalnym rejestrze** — sprawdź je ręcznie."
         )
     for k in _codes:
         if uwaga := (k.get("uwaga") or "").strip():
-            st.caption(f"• {k.get('code') or '—'}: {uwaga}")
+            st.caption(f"• {k.get('klasyfikacja') or '?'} {k.get('code') or '—'}: {uwaga}")
 
+    _default_system = klasyfikacje[0]
     icd_df = pd.DataFrame(
         [
             {
+                "klasyfikacja": k.get("klasyfikacja") or _default_system,
                 "code": k.get("code", ""),
                 "description": k.get("description", ""),
                 "confidence": k.get("confidence", 0.0),
@@ -199,13 +213,24 @@ if "current_note" in st.session_state:
             }
             for k in _codes
         ]
-        or [{"code": "", "description": "", "confidence": 0.0, "zweryfikowany": False}]
+        or [
+            {
+                "klasyfikacja": _default_system,
+                "code": "",
+                "description": "",
+                "confidence": 0.0,
+                "zweryfikowany": False,
+            }
+        ]
     )
     edited_icd = st.data_editor(
         icd_df,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
+            "klasyfikacja": st.column_config.SelectboxColumn(
+                "System", options=["ICD-10", "ICD-11", "DSM-5"], required=True
+            ),
             "code": st.column_config.TextColumn(
                 "Kod", help="Zostaw puste, żeby kod dobrał się automatycznie z nazwy rozpoznania."
             ),
@@ -214,12 +239,14 @@ if "current_note" in st.session_state:
                 "Pewność", min_value=0.0, max_value=1.0, step=0.05, format="%.2f"
             ),
             "zweryfikowany": st.column_config.CheckboxColumn(
-                "WHO", help="Potwierdzone w rejestrze WHO. Ustawiane automatycznie.", disabled=True
+                "Potwierdzony",
+                help="Potwierdzony w rejestrze WHO. Ustawiane automatycznie; DSM-5 nigdy.",
+                disabled=True,
             ),
         },
         key="icd_editor",
     )
-    st.caption("Po zatwierdzeniu kody są ponownie sprawdzane w rejestrze WHO.")
+    st.caption("Po zatwierdzeniu kody ICD są ponownie sprawdzane w rejestrze WHO.")
 
     zalecenia_text = st.text_area(
         "Zalecenia (jedno w linii)",
@@ -244,7 +271,7 @@ if "current_note" in st.session_state:
                 kody_icd=edited_icd.to_dict("records"),
                 zalecenia=split_lines(zalecenia_text),
                 podsumowanie=podsumowanie,
-                klasyfikacja=klasyfikacja,
+                klasyfikacje=klasyfikacje,
                 jakosc_nagrania=note_data.get("jakosc_nagrania", "DOBRA"),
             )
         except Exception as e:

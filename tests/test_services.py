@@ -16,7 +16,9 @@ from src.formatting import (
     audio_quality_label,
     audio_unusable,
     classification_label,
+    classifications_of,
     get_icd_codes,
+    group_codes_by_classification,
     note_to_text,
 )
 from src.pricing import estimate_audio_seconds, format_duration
@@ -141,12 +143,12 @@ class TestBuildCorrectedNote:
         assert note.kody_icd[0].code == "F41.1"
 
     def test_classification_is_recorded(self):
-        note = build_corrected_note(**self._valid_kwargs(klasyfikacja="ICD-11"))
-        assert note.klasyfikacja.value == "ICD-11"
+        note = build_corrected_note(**self._valid_kwargs(klasyfikacje=["ICD-11"]))
+        assert [k.value for k in note.klasyfikacje] == ["ICD-11"]
 
     def test_rejects_unknown_classification(self):
         with pytest.raises(ValueError):
-            build_corrected_note(**self._valid_kwargs(klasyfikacja="ICD-9"))
+            build_corrected_note(**self._valid_kwargs(klasyfikacje=["ICD-9"]))
 
     def test_drops_blank_symptoms(self):
         note = build_corrected_note(**self._valid_kwargs())
@@ -261,8 +263,54 @@ class TestBackwardCompatibility:
         """Notatka bez pola klasyfikacji powstała, gdy istniało tylko ICD-10."""
         assert classification_label({}) == "ICD-10"
 
-    def test_classification_label_from_note(self):
+    def test_reads_legacy_single_classification(self):
+        """Notatki sprzed wyboru wielu systemów mają pojedyncze `klasyfikacja`."""
         assert classification_label({"klasyfikacja": "ICD-11"}) == "ICD-11"
+
+    def test_reads_multiple_classifications(self):
+        note = {"klasyfikacje": ["ICD-10", "DSM-5"]}
+        assert classifications_of(note) == ["ICD-10", "DSM-5"]
+        assert classification_label(note) == "ICD-10 + DSM-5"
+
+
+class TestGroupCodesByClassification:
+    def test_groups_in_requested_order(self):
+        note = {
+            "klasyfikacje": ["ICD-10", "DSM-5"],
+            "kody_icd": [
+                {"klasyfikacja": "DSM-5", "code": "300.02", "description": "GAD"},
+                {"klasyfikacja": "ICD-10", "code": "F41.1", "description": "Lęk uogólniony"},
+            ],
+        }
+        grouped = group_codes_by_classification(note)
+        assert list(grouped) == ["ICD-10", "DSM-5"]
+        assert grouped["ICD-10"][0]["code"] == "F41.1"
+        assert grouped["DSM-5"][0]["code"] == "300.02"
+
+    def test_codes_without_system_fall_into_first_classification(self):
+        note = {"klasyfikacje": ["ICD-11"], "kody_icd": [{"code": "6B00", "description": "GAD"}]}
+        assert list(group_codes_by_classification(note)) == ["ICD-11"]
+
+    def test_legacy_note_groups_under_icd10(self):
+        note = {"kody_icd10": [{"code": "F41.1", "description": "Lęk"}]}
+        assert list(group_codes_by_classification(note)) == ["ICD-10"]
+
+    def test_copyable_text_separates_systems(self):
+        """Lekarz wkleja ten tekst do dokumentacji — systemy nie mogą się zlewać."""
+        note = {
+            "ryzyko_samobojcze": "NIEOBECNE",
+            "klasyfikacje": ["ICD-10", "DSM-5"],
+            "kody_icd": [
+                {"klasyfikacja": "ICD-10", "code": "F41.1", "description": "Lęk", "zweryfikowany": True},
+                {"klasyfikacja": "DSM-5", "code": "300.02", "description": "GAD", "zweryfikowany": False},
+            ],
+        }
+        text = note_to_text(note, title="Wizyta #1")
+        assert "ROZPOZNANIA (ICD-10)" in text
+        assert "ROZPOZNANIA (DSM-5)" in text
+        # tylko DSM-5 jest niepotwierdzony
+        assert "300.02 — GAD [DO WERYFIKACJI]" in text
+        assert "F41.1 — Lęk\n" in text
 
     def test_legacy_note_has_no_audio_warning(self):
         """Stare notatki nie mają pola jakości — nie wolno straszyć fałszywym alarmem."""

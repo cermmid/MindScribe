@@ -39,9 +39,36 @@ def get_icd_codes(note: dict[str, Any]) -> list[dict[str, Any]]:
     return note.get("kody_icd") or note.get("kody_icd10") or []
 
 
+def classifications_of(note: dict[str, Any]) -> list[str]:
+    """Klasyfikacje użyte w notatce, tolerancyjnie wobec starszych wpisów.
+
+    Notatki sprzed wyboru wielu klasyfikacji mają pojedyncze `klasyfikacja`,
+    a te sprzed dodania ICD-11 nie mają go wcale — wtedy z definicji ICD-10.
+    """
+    many = note.get("klasyfikacje")
+    if isinstance(many, list) and many:
+        return [str(k) for k in many if k]
+    single = note.get("klasyfikacja")
+    return [str(single)] if single else ["ICD-10"]
+
+
 def classification_label(note: dict[str, Any]) -> str:
-    """Nazwa klasyfikacji. Notatki sprzed wyboru ICD-11 są z definicji w ICD-10."""
-    return str(note.get("klasyfikacja") or "ICD-10")
+    """Czytelna etykieta klasyfikacji, np. „ICD-10" albo „ICD-10 + DSM-5"."""
+    return " + ".join(classifications_of(note))
+
+
+def group_codes_by_classification(note: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Rozpoznania pogrupowane po klasyfikacji, w kolejności z notatki."""
+    codes = get_icd_codes(note)
+    order = classifications_of(note)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for code in codes:
+        key = str(code.get("klasyfikacja") or "").strip() or (order[0] if order else "ICD-10")
+        grouped.setdefault(key, []).append(code)
+    # Najpierw klasyfikacje zamówione przez lekarza, potem ewentualne pozostałe.
+    ordered = {k: grouped[k] for k in order if k in grouped}
+    ordered.update({k: v for k, v in grouped.items() if k not in ordered})
+    return ordered
 
 
 def audio_unusable(note: dict[str, Any]) -> bool:
@@ -118,24 +145,28 @@ def note_to_text(
         lines.extend(f"- {o}" for o in objawy)
         lines.append("")
 
-    kody = get_icd_codes(note)
-    if kody:
-        lines.append(f"ROZPOZNANIA ({classification_label(note)})")
-        for k in kody:
-            code = (k.get("code") or "").strip()
-            desc = (k.get("description") or "").strip()
-            line = f"- {code}" if code else "- (brak kodu)"
-            if desc:
-                line += f" — {desc}"
-            # Oznaczenie trafia też tutaj, bo ten tekst lekarz wkleja do dokumentacji.
-            if not k.get("zweryfikowany"):
-                line += " [DO WERYFIKACJI]"
-            lines.append(line)
-        if any(not k.get("zweryfikowany") for k in kody):
+    grouped = group_codes_by_classification(note)
+    if grouped:
+        any_unverified = False
+        for system, kody in grouped.items():
+            lines.append(f"ROZPOZNANIA ({system})")
+            for k in kody:
+                code = (k.get("code") or "").strip()
+                desc = (k.get("description") or "").strip()
+                line = f"- {code}" if code else "- (brak kodu)"
+                if desc:
+                    line += f" — {desc}"
+                # Oznaczenie trafia też tutaj, bo ten tekst lekarz wkleja do dokumentacji.
+                if not k.get("zweryfikowany"):
+                    line += " [DO WERYFIKACJI]"
+                    any_unverified = True
+                lines.append(line)
+            lines.append("")
+        if any_unverified:
             lines.append(
-                "  Pozycje [DO WERYFIKACJI] nie zostały potwierdzone w rejestrze WHO."
+                "Pozycje [DO WERYFIKACJI] nie zostały potwierdzone w oficjalnym rejestrze."
             )
-        lines.append("")
+            lines.append("")
 
     zalecenia = note.get("zalecenia") or []
     if zalecenia:

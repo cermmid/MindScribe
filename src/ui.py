@@ -9,8 +9,7 @@ import streamlit.components.v1 as components
 from .formatting import (
     audio_quality_label,
     audio_unusable,
-    classification_label,
-    get_icd_codes,
+    group_codes_by_classification,
     risk_is_present,
     visit_type_label,
 )
@@ -48,22 +47,24 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
         for o in note["objawy"]:
             st.markdown(f"- {o}")
 
-    if kody := get_icd_codes(note):
-        st.markdown(f"#### Rozpoznania ({classification_label(note)})")
-        unverified = [k for k in kody if not k.get("zweryfikowany")]
+    if grouped := group_codes_by_classification(note):
+        all_codes = [k for kody in grouped.values() for k in kody]
+        unverified = [k for k in all_codes if not k.get("zweryfikowany")]
         if unverified:
             st.warning(
-                f"⚠️ {len(unverified)} z {len(kody)} rozpoznań **nie zostało potwierdzonych "
-                "w rejestrze WHO**. Sprawdź je ręcznie przed wpisaniem do dokumentacji."
+                f"⚠️ {len(unverified)} z {len(all_codes)} rozpoznań **nie zostało potwierdzonych "
+                "w oficjalnym rejestrze**. Sprawdź je ręcznie przed wpisaniem do dokumentacji."
             )
-        for k in kody:
-            mark = "✅" if k.get("zweryfikowany") else "❓"
-            code = k.get("code") or "—"
-            conf = k.get("confidence")
-            suffix = f" _(pewność rozpoznania {float(conf):.2f})_" if conf is not None else ""
-            st.markdown(f"- {mark} **{code}** — {k.get('description', '')}{suffix}")
-            if uwaga := (k.get("uwaga") or "").strip():
-                st.caption(f"　↳ {uwaga}")
+        for system, kody in grouped.items():
+            st.markdown(f"#### Rozpoznania ({system})")
+            for k in kody:
+                mark = "✅" if k.get("zweryfikowany") else "❓"
+                code = k.get("code") or "—"
+                conf = k.get("confidence")
+                suffix = f" _(pewność rozpoznania {float(conf):.2f})_" if conf is not None else ""
+                st.markdown(f"- {mark} **{code}** — {k.get('description', '')}{suffix}")
+                if uwaga := (k.get("uwaga") or "").strip():
+                    st.caption(f"　↳ {uwaga}")
 
     if note.get("zalecenia"):
         st.markdown("#### Zalecenia")

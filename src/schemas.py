@@ -11,6 +11,7 @@ class RyzykoSamobojcze(str, Enum):
 class Klasyfikacja(str, Enum):
     ICD_10 = "ICD-10"
     ICD_11 = "ICD-11"
+    DSM_5 = "DSM-5"
 
 
 class JakoscNagrania(str, Enum):
@@ -22,6 +23,12 @@ class JakoscNagrania(str, Enum):
 class ICDCode(BaseModel):
     """Propozycja rozpoznania od modelu — jeszcze niezweryfikowana."""
 
+    klasyfikacja: Klasyfikacja = Field(
+        description=(
+            "Klasyfikacja, do której należy TEN wpis. Gdy poproszono o kilka klasyfikacji, "
+            "podaj to samo rozpoznanie osobnym wpisem dla każdej z nich."
+        )
+    )
     code: str = Field(
         default="",
         description=(
@@ -47,6 +54,7 @@ class VerifiedICDCode(BaseModel):
     że jego własna propozycja została potwierdzona.
     """
 
+    klasyfikacja: str = ""
     code: str = ""
     description: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -73,8 +81,9 @@ class _NoteBase(BaseModel):
             "Pod żadnym pozorem nie wymyślaj treści ani nie kopiuj jej z przykładów."
         )
     )
-    klasyfikacja: Klasyfikacja = Field(
-        description="Klasyfikacja rozpoznań użyta w polu kody_icd — dokładnie ta, o którą poproszono w poleceniu."
+    klasyfikacje: list[Klasyfikacja] = Field(
+        default_factory=list,
+        description="Klasyfikacje, o które poproszono w poleceniu — wypisz dokładnie te i tylko te.",
     )
     ryzyko_samobojcze: RyzykoSamobojcze = Field(
         description=(

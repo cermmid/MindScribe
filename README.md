@@ -100,6 +100,14 @@ Bez tych kluczy aplikacja **działa normalnie**, ale każde rozpoznanie jest ozn
 
 ⚠️ Weryfikacja potwierdza, że **kod istnieje i co oznacza**. Nie potwierdza, że rozpoznanie jest trafne klinicznie — to zawsze decyzja lekarza.
 
+### Wybór klasyfikacji: ICD-10, ICD-11, DSM-5
+
+Lekarz zaznacza jedną albo kilka naraz — przy kilku to samo rozpoznanie dostaje osobny wpis w każdym systemie, a widok i tekst do skopiowania grupują je po systemie.
+
+**DSM-5 działa inaczej i trzeba o tym wiedzieć.** Wydaje go Amerykańskie Towarzystwo Psychiatryczne, jest objęty prawem autorskim i **nie ma publicznego rejestru do odpytania** — odpowiednika API WHO po prostu nie ma. Dlatego rozpoznania DSM-5 **zawsze** wracają oznaczone do weryfikacji, niezależnie od tego, jak pewny jest model.
+
+Ponieważ DSM-5 posługuje się kodami ICD-10-CM, gdy model poda kod, robimy pomocniczą kontrolę w ICD-10 i dopisujemy jej wynik w uwadze („Kontrolnie: F41.1 w ICD-10 to…"). To wskazówka dla lekarza, **nie potwierdzenie** — ICD-10-CM to amerykańska modyfikacja i nie każdy jej kod istnieje w wersji WHO.
+
 ## Panel właściciela (koszty i statystyki)
 
 Lekarze **nie widzą** kosztów ani zużycia tokenów — te dane są dalej zbierane i zapisywane, ale pokazywane wyłącznie w osobnej aplikacji:

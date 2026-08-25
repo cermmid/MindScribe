@@ -57,7 +57,9 @@ def split_lines(text: str | None) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def clean_icd_rows(rows: Iterable[Mapping[str, Any]]) -> list[ICDCode]:
+def clean_icd_rows(
+    rows: Iterable[Mapping[str, Any]], *, default_klasyfikacja: str = "ICD-10"
+) -> list[ICDCode]:
     """Zamień surowe wiersze z edytora na propozycje rozpoznań.
 
     Odrzucamy wyłącznie wiersze **całkiem puste** — tak znika zaślepka z formularza.
@@ -80,11 +82,35 @@ def clean_icd_rows(rows: Iterable[Mapping[str, Any]]) -> list[ICDCode]:
         if confidence != confidence:  # NaN
             confidence = 0.0
         confidence = min(max(confidence, 0.0), 1.0)
-        cleaned.append(ICDCode(code=code, description=description, confidence=confidence))
+        cleaned.append(
+            ICDCode(
+                klasyfikacja=Klasyfikacja(
+                    _normalize_klasyfikacja(row.get("klasyfikacja") or default_klasyfikacja)
+                ),
+                code=code,
+                description=description,
+                confidence=confidence,
+            )
+        )
     return cleaned
 
 
 # --- Weryfikacja rozpoznań w rejestrze WHO -------------------------------------
+
+
+DSM5_NOTE = (
+    "DSM-5 nie ma publicznego rejestru, więc tego wpisu nie da się potwierdzić "
+    "automatycznie — zweryfikuj w podręczniku DSM-5."
+)
+
+
+def _normalize_klasyfikacja(value: Any) -> str:
+    text = str(getattr(value, "value", value) or "").strip().upper().replace(" ", "")
+    if text in {"ICD-11", "ICD11"}:
+        return "ICD-11"
+    if text in {"DSM-5", "DSM5", "DSMV"}:
+        return "DSM-5"
+    return "ICD-10"
 
 
 def verify_icd_codes(
@@ -94,27 +120,47 @@ def verify_icd_codes(
 ) -> list[VerifiedICDCode]:
     """Sprawdź propozycje modelu w API WHO i zastąp opisy oficjalnymi tytułami.
 
-    Kolejność działań dla każdej propozycji:
+    Każdy wpis weryfikowany jest wg **własnej** klasyfikacji, bo notatka może zawierać
+    kilka systemów naraz. `klasyfikacja` to wartość zapasowa dla wpisów bez tej informacji.
+
+    Kolejność działań:
     1. jeśli model podał kod — potwierdź go i weź oficjalny tytuł,
     2. jeśli kodu brak albo nie istnieje — wyszukaj po nazwie rozpoznania,
     3. jeśli i to zawiedzie — zostaw propozycję oznaczoną jako niezweryfikowana.
+
+    DSM-5 jest wydawany przez APA i nie ma publicznego rejestru, więc jego wpisów nie
+    potwierdzamy. Ponieważ DSM-5 posługuje się kodami ICD-10-CM, robimy jedynie kontrolę
+    pomocniczą w ICD-10 i zapisujemy jej wynik w uwadze — to wskazówka, nie potwierdzenie.
 
     Awaria API nigdy nie przerywa pracy: wszystko wraca jako niezweryfikowane
     z czytelną uwagą, a lekarz decyduje.
     """
     from . import icd
 
-    icd11 = klasyfikacja.strip().upper().replace(" ", "") == "ICD-11"
+    fallback = _normalize_klasyfikacja(klasyfikacja)
     results: list[VerifiedICDCode] = []
     api_down_note = ""
 
     for proposal in proposals:
-        item = proposal if isinstance(proposal, ICDCode) else ICDCode(**dict(proposal))
+        if isinstance(proposal, ICDCode):
+            item = proposal
+        else:
+            # Wpisy ze starszych notatek i z edytora nie muszą mieć klasyfikacji —
+            # w schemacie modelu jest wymagana, tutaj uzupełniamy zamówioną.
+            data = dict(proposal)
+            data.setdefault("klasyfikacja", fallback)
+            item = ICDCode(**data)
         proposed_name = (item.description or "").strip()
         proposed_code = (item.code or "").strip()
+        system = _normalize_klasyfikacja(item.klasyfikacja)
+        icd11 = system == "ICD-11"
+
+        if system == "DSM-5":
+            results.append(_verify_dsm5(item, system, api_down_note))
+            continue
 
         if api_down_note:
-            results.append(_unverified(item, api_down_note))
+            results.append(_unverified(item, api_down_note, system))
             continue
 
         try:
@@ -128,7 +174,7 @@ def verify_icd_codes(
                 "Nie udało się połączyć z rejestrem WHO — kod NIE został zweryfikowany. "
                 f"({exc})"
             )
-            results.append(_unverified(item, api_down_note))
+            results.append(_unverified(item, api_down_note, system))
             continue
 
         if match is not None:
@@ -137,6 +183,7 @@ def verify_icd_codes(
                 note = f"Model opisał ten kod jako „{proposed_name}” — oficjalnie to „{match.title}”."
             results.append(
                 VerifiedICDCode(
+                    klasyfikacja=system,
                     code=match.code,
                     description=match.title,
                     confidence=item.confidence,
@@ -149,11 +196,12 @@ def verify_icd_codes(
             note = ""
             if proposed_code:
                 note = (
-                    f"Kod zaproponowany przez model ({proposed_code}) nie istnieje w {klasyfikacja} "
+                    f"Kod zaproponowany przez model ({proposed_code}) nie istnieje w {system} "
                     f"albo nie pasuje — dobrano {searched.code} na podstawie nazwy rozpoznania."
                 )
             results.append(
                 VerifiedICDCode(
+                    klasyfikacja=system,
                     code=searched.code,
                     description=searched.title,
                     confidence=item.confidence,
@@ -166,16 +214,39 @@ def verify_icd_codes(
             results.append(
                 _unverified(
                     item,
-                    f"Nie znaleziono tego rozpoznania w rejestrze WHO dla {klasyfikacja}. "
+                    f"Nie znaleziono tego rozpoznania w rejestrze WHO dla {system}. "
                     "Zweryfikuj ręcznie przed wpisaniem do dokumentacji.",
+                    system,
                 )
             )
 
     return results
 
 
-def _unverified(item: ICDCode, note: str) -> VerifiedICDCode:
+def _verify_dsm5(item: ICDCode, system: str, api_down_note: str) -> VerifiedICDCode:
+    """DSM-5 zawsze wraca jako niezweryfikowany — nie ma publicznego rejestru do sprawdzenia.
+
+    DSM-5 posługuje się kodami ICD-10-CM, więc gdy model podał kod, robimy pomocniczą
+    kontrolę w ICD-10 i dopisujemy jej wynik. To wskazówka dla lekarza, nie potwierdzenie:
+    ICD-10-CM to amerykańska modyfikacja ICD-10 i nie każdy jej kod istnieje w wersji WHO.
+    """
+    from . import icd
+
+    note = DSM5_NOTE
+    code = (item.code or "").strip()
+    if code and not api_down_note:
+        try:
+            crosscheck = icd.lookup_code(code, icd11=False)
+        except icd.IcdUnavailable:
+            crosscheck = None
+        if crosscheck is not None:
+            note = f"{DSM5_NOTE} Kontrolnie: {code} w ICD-10 to „{crosscheck.title}”."
+    return _unverified(item, note, system)
+
+
+def _unverified(item: ICDCode, note: str, system: str = "") -> VerifiedICDCode:
     return VerifiedICDCode(
+        klasyfikacja=system or _normalize_klasyfikacja(getattr(item, "klasyfikacja", None)),
         code=(item.code or "").strip(),
         description=(item.description or "").strip(),
         confidence=item.confidence,
@@ -221,7 +292,7 @@ def create_visit_from_audio(
     doctor_id: str | None = None,
     few_shot: list[dict[str, str]] | None = None,
     pipeline: str = "multimodal",
-    klasyfikacja: str = "ICD-10",
+    klasyfikacje: list[str] | str = "ICD-10",
 ) -> CreatedVisit:
     """Pełna ścieżka: zapis audio → few-shot → Gemini → zapis wizyty jako draft.
 
@@ -239,15 +310,19 @@ def create_visit_from_audio(
     if few_shot is None:
         few_shot = load_few_shot_examples(doctor_id)
 
+    wanted = [klasyfikacje] if isinstance(klasyfikacje, str) else list(klasyfikacje)
+    wanted = wanted or ["ICD-10"]
+
     audio_path: Path = save_uploaded_audio(audio_bytes, suffix=audio_suffix)
     draft, debug_prompt, usage = generate_note_from_audio(
-        audio_path, few_shot, mime_type=audio_mime, klasyfikacja=klasyfikacja
+        audio_path, few_shot, mime_type=audio_mime, klasyfikacje=wanted
     )
 
     # Kody od modelu są tylko propozycją — do notatki trafiają dopiero po sprawdzeniu w WHO.
     note = PsychiatricNote(
-        **draft.model_dump(exclude={"kody_icd"}),
-        kody_icd=verify_icd_codes(draft.kody_icd, klasyfikacja=klasyfikacja),
+        **draft.model_dump(exclude={"kody_icd", "klasyfikacje"}),
+        klasyfikacje=[Klasyfikacja(k) for k in wanted],
+        kody_icd=verify_icd_codes(draft.kody_icd, klasyfikacja=wanted[0]),
     )
 
     visit_id = insert_visit(
@@ -282,7 +357,7 @@ def build_corrected_note(
     kody_icd: Iterable[Mapping[str, Any]] | Iterable[ICDCode],
     zalecenia: Iterable[str],
     podsumowanie: str,
-    klasyfikacja: str = "ICD-10",
+    klasyfikacje: list[str] | str = "ICD-10",
     jakosc_nagrania: str = "DOBRA",
     verify: bool = True,
 ) -> PsychiatricNote:
@@ -291,21 +366,24 @@ def build_corrected_note(
     Kody poprawione ręcznie przez lekarza też przechodzą weryfikację w WHO — inaczej
     literówka w kodzie trafiłaby do dokumentacji bez żadnej kontroli.
     """
+    wanted = [klasyfikacje] if isinstance(klasyfikacje, str) else list(klasyfikacje)
+    wanted = wanted or ["ICD-10"]
+
     icd_list = list(kody_icd)
     proposals = (
         icd_list
         if icd_list and isinstance(icd_list[0], ICDCode)
-        else clean_icd_rows(icd_list)  # type: ignore[arg-type]
+        else clean_icd_rows(icd_list, default_klasyfikacja=wanted[0])  # type: ignore[arg-type]
     )
     codes = (
-        verify_icd_codes(proposals, klasyfikacja=klasyfikacja)
+        verify_icd_codes(proposals, klasyfikacja=wanted[0])
         if verify
         else [_unverified(p, "Weryfikacja pominięta.") for p in proposals]
     )
     return PsychiatricNote(
         jakosc_nagrania=JakoscNagrania(jakosc_nagrania),
         raw_transcript=raw_transcript,
-        klasyfikacja=Klasyfikacja(klasyfikacja),
+        klasyfikacje=[Klasyfikacja(k) for k in wanted],
         ryzyko_samobojcze=RyzykoSamobojcze(ryzyko_samobojcze),
         ryzyko_samobojcze_opis=(ryzyko_samobojcze_opis or "").strip(),
         status_psychiczny=status_psychiczny,

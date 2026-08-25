@@ -50,23 +50,43 @@ def build_few_shot_block(examples: list[dict]) -> str:
 def build_user_prompt(
     few_shot_examples: list[dict],
     transcript: str | None = None,
-    klasyfikacja: str = "ICD-10",
+    klasyfikacje: list[str] | str = "ICD-10",
 ) -> str:
     """Build the text prompt. If `transcript` is given, append it; otherwise rely on attached audio."""
+    if isinstance(klasyfikacje, str):
+        klasyfikacje = [klasyfikacje]
+    wanted = [k for k in klasyfikacje if k] or ["ICD-10"]
+
     parts = [build_few_shot_block(few_shot_examples)]
 
-    classification_rule = (
-        f"### KLASYFIKACJA ROZPOZNAŃ\n"
-        f"Dla tej wizyty użyj klasyfikacji **{klasyfikacja}**, "
-        f"a w polu `klasyfikacja` wpisz dokładnie \"{klasyfikacja}\".\n"
-        "W polu `kody_icd` najważniejsza jest **nazwa rozpoznania** (`description`) — "
-        "wypełnij ją zawsze i precyzyjnie.\n"
-        "Pole `code` wypełnij TYLKO jeśli jesteś pewien kodu. Jeśli masz jakiekolwiek "
-        "wątpliwości, zostaw je PUSTE — kod zostanie ustalony automatycznie w oficjalnym "
-        "rejestrze WHO na podstawie nazwy. Każdy podany kod i tak jest tam sprawdzany, "
-        "więc zgadywanie niczego nie da, a tylko wprowadzi w błąd.\n"
+    listing = ", ".join(f"**{k}**" for k in wanted)
+    rule = [
+        "### KLASYFIKACJE ROZPOZNAŃ",
+        f"Dla tej wizyty użyj: {listing}.",
+        f"W polu `klasyfikacje` wypisz dokładnie: {', '.join(wanted)}.",
+    ]
+    if len(wanted) > 1:
+        rule.append(
+            "To ten sam obraz kliniczny wyrażony w kilku systemach — dla KAŻDEGO rozpoznania "
+            "utwórz osobny wpis w `kody_icd` dla każdej z tych klasyfikacji, oznaczając "
+            "w polu `klasyfikacja` tę właściwą. Nie pomijaj żadnej i nie mieszaj kodów między nimi."
+        )
+    rule.append(
+        "Najważniejsza jest **nazwa rozpoznania** (`description`) — wypełnij ją zawsze i precyzyjnie."
     )
-    parts.append(classification_rule)
+    rule.append(
+        "Pole `code` wypełnij TYLKO jeśli jesteś pewien kodu. Przy jakichkolwiek wątpliwościach "
+        "zostaw je PUSTE — dla ICD-10 i ICD-11 kod zostanie ustalony automatycznie w oficjalnym "
+        "rejestrze WHO na podstawie nazwy, a każdy podany kod i tak jest tam sprawdzany. "
+        "Zgadywanie niczego nie daje, a wprowadza w błąd."
+    )
+    if "DSM-5" in wanted:
+        rule.append(
+            "Dla DSM-5 podawaj przede wszystkim **pełną nazwę rozpoznania wg DSM-5**. "
+            "DSM-5 nie ma publicznego rejestru, więc tych wpisów nie da się potwierdzić "
+            "automatycznie — tym bardziej nie zgaduj kodów."
+        )
+    parts.append("\n".join(rule) + "\n")
 
     if transcript:
         parts.append(f"### TRANSKRYPCJA NOWEJ WIZYTY:\n{transcript}\n")

@@ -96,7 +96,7 @@ def generate_note_from_audio(
     few_shot_examples: list[dict],
     *,
     mime_type: str | None = None,
-    klasyfikacja: str = "ICD-10",
+    klasyfikacje: list[str] | str = "ICD-10",
 ) -> tuple[PsychiatricNoteDraft, str, dict]:
     """Send audio inline (as bytes) and request a structured note.
 
@@ -109,7 +109,7 @@ def generate_note_from_audio(
         data=audio_path.read_bytes(),
         mime_type=mime,
     )
-    prompt = build_user_prompt(few_shot_examples, transcript=None, klasyfikacja=klasyfikacja)
+    prompt = build_user_prompt(few_shot_examples, transcript=None, klasyfikacje=klasyfikacje)
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -124,11 +124,11 @@ def generate_note_from_text(
     transcript: str,
     few_shot_examples: list[dict],
     *,
-    klasyfikacja: str = "ICD-10",
+    klasyfikacje: list[str] | str = "ICD-10",
 ) -> tuple[PsychiatricNoteDraft, str, dict]:
     """Reserved for the future Whisper → text → Gemini pipeline."""
     client = _client()
-    prompt = build_user_prompt(few_shot_examples, transcript=transcript, klasyfikacja=klasyfikacja)
+    prompt = build_user_prompt(few_shot_examples, transcript=transcript, klasyfikacje=klasyfikacje)
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[prompt],
