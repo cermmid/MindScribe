@@ -57,9 +57,14 @@ def build_user_prompt(
 
     classification_rule = (
         f"### KLASYFIKACJA ROZPOZNAŃ\n"
-        f"Dla tej wizyty użyj klasyfikacji **{klasyfikacja}**. "
-        f"W polu `kody_icd` podaj wyłącznie kody z {klasyfikacja}, "
+        f"Dla tej wizyty użyj klasyfikacji **{klasyfikacja}**, "
         f"a w polu `klasyfikacja` wpisz dokładnie \"{klasyfikacja}\".\n"
+        "W polu `kody_icd` najważniejsza jest **nazwa rozpoznania** (`description`) — "
+        "wypełnij ją zawsze i precyzyjnie.\n"
+        "Pole `code` wypełnij TYLKO jeśli jesteś pewien kodu. Jeśli masz jakiekolwiek "
+        "wątpliwości, zostaw je PUSTE — kod zostanie ustalony automatycznie w oficjalnym "
+        "rejestrze WHO na podstawie nazwy. Każdy podany kod i tak jest tam sprawdzany, "
+        "więc zgadywanie niczego nie da, a tylko wprowadzi w błąd.\n"
     )
     parts.append(classification_rule)
 

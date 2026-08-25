@@ -178,22 +178,48 @@ if "current_note" in st.session_state:
     )
 
     st.markdown(f"**Proponowane kody {klasyfikacja}**")
+    _codes = get_icd_codes(note_data)
+    _unverified = [k for k in _codes if not k.get("zweryfikowany")]
+    if _unverified:
+        st.warning(
+            f"⚠️ {len(_unverified)} z {len(_codes)} rozpoznań **nie zostało potwierdzonych "
+            "w rejestrze WHO** — sprawdź je ręcznie."
+        )
+    for k in _codes:
+        if uwaga := (k.get("uwaga") or "").strip():
+            st.caption(f"• {k.get('code') or '—'}: {uwaga}")
+
     icd_df = pd.DataFrame(
-        get_icd_codes(note_data) or [{"code": "", "description": "", "confidence": 0.0}]
+        [
+            {
+                "code": k.get("code", ""),
+                "description": k.get("description", ""),
+                "confidence": k.get("confidence", 0.0),
+                "zweryfikowany": bool(k.get("zweryfikowany")),
+            }
+            for k in _codes
+        ]
+        or [{"code": "", "description": "", "confidence": 0.0, "zweryfikowany": False}]
     )
     edited_icd = st.data_editor(
         icd_df,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "code": st.column_config.TextColumn("Kod", required=True),
-            "description": st.column_config.TextColumn("Opis"),
+            "code": st.column_config.TextColumn(
+                "Kod", help="Zostaw puste, żeby kod dobrał się automatycznie z nazwy rozpoznania."
+            ),
+            "description": st.column_config.TextColumn("Rozpoznanie", required=True),
             "confidence": st.column_config.NumberColumn(
                 "Pewność", min_value=0.0, max_value=1.0, step=0.05, format="%.2f"
+            ),
+            "zweryfikowany": st.column_config.CheckboxColumn(
+                "WHO", help="Potwierdzone w rejestrze WHO. Ustawiane automatycznie.", disabled=True
             ),
         },
         key="icd_editor",
     )
+    st.caption("Po zatwierdzeniu kody są ponownie sprawdzane w rejestrze WHO.")
 
     zalecenia_text = st.text_area(
         "Zalecenia (jedno w linii)",

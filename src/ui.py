@@ -50,10 +50,20 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
 
     if kody := get_icd_codes(note):
         st.markdown(f"#### Rozpoznania ({classification_label(note)})")
+        unverified = [k for k in kody if not k.get("zweryfikowany")]
+        if unverified:
+            st.warning(
+                f"⚠️ {len(unverified)} z {len(kody)} rozpoznań **nie zostało potwierdzonych "
+                "w rejestrze WHO**. Sprawdź je ręcznie przed wpisaniem do dokumentacji."
+            )
         for k in kody:
+            mark = "✅" if k.get("zweryfikowany") else "❓"
+            code = k.get("code") or "—"
             conf = k.get("confidence")
-            suffix = f" _(pewność {float(conf):.2f})_" if conf is not None else ""
-            st.markdown(f"- **{k.get('code', '')}** — {k.get('description', '')}{suffix}")
+            suffix = f" _(pewność rozpoznania {float(conf):.2f})_" if conf is not None else ""
+            st.markdown(f"- {mark} **{code}** — {k.get('description', '')}{suffix}")
+            if uwaga := (k.get("uwaga") or "").strip():
+                st.caption(f"　↳ {uwaga}")
 
     if note.get("zalecenia"):
         st.markdown("#### Zalecenia")

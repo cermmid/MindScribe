@@ -32,6 +32,11 @@ def _as_bool(v) -> bool:
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or _from_secrets("GEMINI_API_KEY") or ""
 GEMINI_MODEL = os.getenv("GEMINI_MODEL") or _from_secrets("GEMINI_MODEL") or "gemini-2.5-flash"
 
+# Poświadczenia do API WHO (icd.who.int/icdapi) — weryfikacja kodów rozpoznań.
+# Bez nich aplikacja działa, ale kody zostają oznaczone jako niezweryfikowane.
+ICD_CLIENT_ID = os.getenv("ICD_CLIENT_ID") or _from_secrets("ICD_CLIENT_ID") or ""
+ICD_CLIENT_SECRET = os.getenv("ICD_CLIENT_SECRET") or _from_secrets("ICD_CLIENT_SECRET") or ""
+
 USE_VERTEX_AI = _as_bool(os.getenv("USE_VERTEX_AI") or _from_secrets("USE_VERTEX_AI") or "false")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID") or _from_secrets("GCP_PROJECT_ID") or ""
 GCP_LOCATION = os.getenv("GCP_LOCATION") or _from_secrets("GCP_LOCATION") or "europe-west4"

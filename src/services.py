@@ -23,6 +23,7 @@ from .schemas import (
     Klasyfikacja,
     PsychiatricNote,
     RyzykoSamobojcze,
+    VerifiedICDCode,
 )
 
 # `gemini_client` ciągnie za sobą cały SDK Google, więc importujemy go leniwie —
@@ -57,15 +58,19 @@ def split_lines(text: str | None) -> list[str]:
 
 
 def clean_icd_rows(rows: Iterable[Mapping[str, Any]]) -> list[ICDCode]:
-    """Zamień surowe wiersze z edytora na zwalidowane kody ICD.
+    """Zamień surowe wiersze z edytora na propozycje rozpoznań.
 
-    Wiersze z pustym kodem są **odrzucane** — tak znika wiersz-zaślepka z formularza.
+    Odrzucamy wyłącznie wiersze **całkiem puste** — tak znika zaślepka z formularza.
+    Sam pusty kod jest poprawny: rozpoznanie opisane nazwą dostanie kod z rejestru WHO,
+    a to bezpieczniejsze niż kod zgadnięty przez model.
+
     `confidence` bywa `None` albo `NaN`, stąd podwójne zabezpieczenie.
     """
     cleaned: list[ICDCode] = []
     for row in rows:
         code = str(row.get("code") or "").strip()
-        if not code:
+        description = str(row.get("description") or "").strip()
+        if not code and not description:
             continue
         raw_conf = row.get("confidence")
         try:
@@ -75,14 +80,114 @@ def clean_icd_rows(rows: Iterable[Mapping[str, Any]]) -> list[ICDCode]:
         if confidence != confidence:  # NaN
             confidence = 0.0
         confidence = min(max(confidence, 0.0), 1.0)
-        cleaned.append(
-            ICDCode(
-                code=code,
-                description=str(row.get("description") or "").strip(),
-                confidence=confidence,
-            )
-        )
+        cleaned.append(ICDCode(code=code, description=description, confidence=confidence))
     return cleaned
+
+
+# --- Weryfikacja rozpoznań w rejestrze WHO -------------------------------------
+
+
+def verify_icd_codes(
+    proposals: Iterable[ICDCode | Mapping[str, Any]],
+    *,
+    klasyfikacja: str = "ICD-10",
+) -> list[VerifiedICDCode]:
+    """Sprawdź propozycje modelu w API WHO i zastąp opisy oficjalnymi tytułami.
+
+    Kolejność działań dla każdej propozycji:
+    1. jeśli model podał kod — potwierdź go i weź oficjalny tytuł,
+    2. jeśli kodu brak albo nie istnieje — wyszukaj po nazwie rozpoznania,
+    3. jeśli i to zawiedzie — zostaw propozycję oznaczoną jako niezweryfikowana.
+
+    Awaria API nigdy nie przerywa pracy: wszystko wraca jako niezweryfikowane
+    z czytelną uwagą, a lekarz decyduje.
+    """
+    from . import icd
+
+    icd11 = klasyfikacja.strip().upper().replace(" ", "") == "ICD-11"
+    results: list[VerifiedICDCode] = []
+    api_down_note = ""
+
+    for proposal in proposals:
+        item = proposal if isinstance(proposal, ICDCode) else ICDCode(**dict(proposal))
+        proposed_name = (item.description or "").strip()
+        proposed_code = (item.code or "").strip()
+
+        if api_down_note:
+            results.append(_unverified(item, api_down_note))
+            continue
+
+        try:
+            match = icd.lookup_code(proposed_code, icd11=icd11) if proposed_code else None
+            searched = None
+            if match is None and proposed_name:
+                candidates = icd.search(proposed_name, icd11=icd11)
+                searched = candidates[0] if candidates else None
+        except icd.IcdUnavailable as exc:
+            api_down_note = (
+                "Nie udało się połączyć z rejestrem WHO — kod NIE został zweryfikowany. "
+                f"({exc})"
+            )
+            results.append(_unverified(item, api_down_note))
+            continue
+
+        if match is not None:
+            note = ""
+            if proposed_name and _differs(proposed_name, match.title):
+                note = f"Model opisał ten kod jako „{proposed_name}” — oficjalnie to „{match.title}”."
+            results.append(
+                VerifiedICDCode(
+                    code=match.code,
+                    description=match.title,
+                    confidence=item.confidence,
+                    zweryfikowany=True,
+                    propozycja_ai=proposed_name if note else "",
+                    uwaga=note,
+                )
+            )
+        elif searched is not None:
+            note = ""
+            if proposed_code:
+                note = (
+                    f"Kod zaproponowany przez model ({proposed_code}) nie istnieje w {klasyfikacja} "
+                    f"albo nie pasuje — dobrano {searched.code} na podstawie nazwy rozpoznania."
+                )
+            results.append(
+                VerifiedICDCode(
+                    code=searched.code,
+                    description=searched.title,
+                    confidence=item.confidence,
+                    zweryfikowany=True,
+                    propozycja_ai=proposed_name,
+                    uwaga=note,
+                )
+            )
+        else:
+            results.append(
+                _unverified(
+                    item,
+                    f"Nie znaleziono tego rozpoznania w rejestrze WHO dla {klasyfikacja}. "
+                    "Zweryfikuj ręcznie przed wpisaniem do dokumentacji.",
+                )
+            )
+
+    return results
+
+
+def _unverified(item: ICDCode, note: str) -> VerifiedICDCode:
+    return VerifiedICDCode(
+        code=(item.code or "").strip(),
+        description=(item.description or "").strip(),
+        confidence=item.confidence,
+        zweryfikowany=False,
+        uwaga=note,
+    )
+
+
+def _differs(a: str, b: str) -> bool:
+    """Czy dwie nazwy rozpoznania są istotnie różne (pomijając wielkość liter i interpunkcję)."""
+    normalize = lambda s: "".join(ch for ch in s.lower() if ch.isalnum())  # noqa: E731
+    return normalize(a) != normalize(b)
 
 
 # --- Przypadek użycia: utworzenie wizyty ---------------------------------------
@@ -135,8 +240,14 @@ def create_visit_from_audio(
         few_shot = load_few_shot_examples(doctor_id)
 
     audio_path: Path = save_uploaded_audio(audio_bytes, suffix=audio_suffix)
-    note, debug_prompt, usage = generate_note_from_audio(
+    draft, debug_prompt, usage = generate_note_from_audio(
         audio_path, few_shot, mime_type=audio_mime, klasyfikacja=klasyfikacja
+    )
+
+    # Kody od modelu są tylko propozycją — do notatki trafiają dopiero po sprawdzeniu w WHO.
+    note = PsychiatricNote(
+        **draft.model_dump(exclude={"kody_icd"}),
+        kody_icd=verify_icd_codes(draft.kody_icd, klasyfikacja=klasyfikacja),
     )
 
     visit_id = insert_visit(
@@ -173,13 +284,23 @@ def build_corrected_note(
     podsumowanie: str,
     klasyfikacja: str = "ICD-10",
     jakosc_nagrania: str = "DOBRA",
+    verify: bool = True,
 ) -> PsychiatricNote:
-    """Zbuduj i zwaliduj poprawioną notatkę. Rzuca `ValidationError`, gdy dane są złe."""
+    """Zbuduj i zwaliduj poprawioną notatkę. Rzuca `ValidationError`, gdy dane są złe.
+
+    Kody poprawione ręcznie przez lekarza też przechodzą weryfikację w WHO — inaczej
+    literówka w kodzie trafiłaby do dokumentacji bez żadnej kontroli.
+    """
     icd_list = list(kody_icd)
-    codes = (
+    proposals = (
         icd_list
         if icd_list and isinstance(icd_list[0], ICDCode)
         else clean_icd_rows(icd_list)  # type: ignore[arg-type]
+    )
+    codes = (
+        verify_icd_codes(proposals, klasyfikacja=klasyfikacja)
+        if verify
+        else [_unverified(p, "Weryfikacja pominięta.") for p in proposals]
     )
     return PsychiatricNote(
         jakosc_nagrania=JakoscNagrania(jakosc_nagrania),

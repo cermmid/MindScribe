@@ -20,12 +20,44 @@ class JakoscNagrania(str, Enum):
 
 
 class ICDCode(BaseModel):
-    code: str = Field(description="Kod rozpoznania, np. F32.1 (ICD-10) albo 6A70.1 (ICD-11)")
-    description: str = Field(description="Pełna nazwa rozpoznania")
-    confidence: float = Field(ge=0.0, le=1.0, description="Pewność modelu, 0.0-1.0")
+    """Propozycja rozpoznania od modelu — jeszcze niezweryfikowana."""
+
+    code: str = Field(
+        default="",
+        description=(
+            "Kod rozpoznania, jeśli jesteś go PEWIEN (np. F41.1 dla ICD-10). "
+            "Jeśli nie masz pewności co do kodu, zostaw to pole PUSTE i wypełnij samo "
+            "`description` — kod zostanie ustalony automatycznie w oficjalnym rejestrze WHO. "
+            "Zgadnięty kod jest gorszy niż jego brak."
+        ),
+    )
+    description: str = Field(
+        description="Pełna nazwa rozpoznania po polsku — wypełnij ZAWSZE, to na jej podstawie szukamy kodu."
+    )
+    confidence: float = Field(
+        ge=0.0, le=1.0, description="Twoja pewność co do samego ROZPOZNANIA (nie kodu), 0.0-1.0"
+    )
 
 
-class PsychiatricNote(BaseModel):
+class VerifiedICDCode(BaseModel):
+    """Rozpoznanie po sprawdzeniu w rejestrze WHO.
+
+    Pola weryfikacyjne wypełnia wyłącznie aplikacja — model nie ma do nich dostępu,
+    bo jest osobny schemat wejściowy (`ICDCode`). To celowe: model nie może oświadczyć,
+    że jego własna propozycja została potwierdzona.
+    """
+
+    code: str = ""
+    description: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    zweryfikowany: bool = False
+    propozycja_ai: str = Field(
+        default="", description="Pierwotna nazwa od modelu, gdy różni się od oficjalnej."
+    )
+    uwaga: str = ""
+
+
+class _NoteBase(BaseModel):
     jakosc_nagrania: JakoscNagrania = Field(
         description=(
             "Ocena użyteczności nagrania. BRAK_MOWY — w nagraniu nie ma zrozumiałej mowy "
@@ -62,13 +94,6 @@ class PsychiatricNote(BaseModel):
         default_factory=list,
         description="Lista konkretnych objawów zgłoszonych lub zaobserwowanych podczas wizyty.",
     )
-    kody_icd: list[ICDCode] = Field(
-        default_factory=list,
-        description=(
-            "Proponowane rozpoznania w klasyfikacji wskazanej w poleceniu (ICD-10 albo ICD-11). "
-            "Używaj kodów TEJ klasyfikacji, o którą poproszono — nie mieszaj obu."
-        ),
-    )
     zalecenia: list[str] = Field(
         default_factory=list,
         description="Zalecenia farmakologiczne i niefarmakologiczne, dalsze badania, follow-up.",
@@ -76,3 +101,21 @@ class PsychiatricNote(BaseModel):
     podsumowanie: str = Field(
         description="Krótkie 2-3 zdaniowe podsumowanie wizyty."
     )
+
+
+class PsychiatricNoteDraft(_NoteBase):
+    """Kształt odpowiedzi modelu — kody są jeszcze propozycjami."""
+
+    kody_icd: list[ICDCode] = Field(
+        default_factory=list,
+        description=(
+            "Proponowane rozpoznania w klasyfikacji wskazanej w poleceniu (ICD-10 albo ICD-11). "
+            "Podawaj wyłącznie rozpoznania uzasadnione obrazem klinicznym."
+        ),
+    )
+
+
+class PsychiatricNote(_NoteBase):
+    """Notatka zapisywana i pokazywana lekarzowi — kody po sprawdzeniu w rejestrze WHO."""
+
+    kody_icd: list[VerifiedICDCode] = Field(default_factory=list)

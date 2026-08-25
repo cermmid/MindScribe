@@ -15,7 +15,7 @@ from .config import (
 )
 from .pricing import estimate_usage_and_cost
 from .prompts import SYSTEM_PROMPT, build_user_prompt
-from .schemas import PsychiatricNote
+from .schemas import PsychiatricNoteDraft
 
 
 def _vertex_credentials():
@@ -78,17 +78,17 @@ def _generation_config() -> types.GenerateContentConfig:
     return types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         response_mime_type="application/json",
-        response_schema=PsychiatricNote,
+        response_schema=PsychiatricNoteDraft,
         temperature=0.2,
         thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
     )
 
 
-def _parse(response) -> PsychiatricNote:
+def _parse(response) -> PsychiatricNoteDraft:
     parsed = getattr(response, "parsed", None)
-    if isinstance(parsed, PsychiatricNote):
+    if isinstance(parsed, PsychiatricNoteDraft):
         return parsed
-    return PsychiatricNote.model_validate_json(response.text)
+    return PsychiatricNoteDraft.model_validate_json(response.text)
 
 
 def generate_note_from_audio(
@@ -97,7 +97,7 @@ def generate_note_from_audio(
     *,
     mime_type: str | None = None,
     klasyfikacja: str = "ICD-10",
-) -> tuple[PsychiatricNote, str, dict]:
+) -> tuple[PsychiatricNoteDraft, str, dict]:
     """Send audio inline (as bytes) and request a structured note.
 
     Inline payload works for both Vertex AI and the Developer API. Vertex AI
@@ -125,7 +125,7 @@ def generate_note_from_text(
     few_shot_examples: list[dict],
     *,
     klasyfikacja: str = "ICD-10",
-) -> tuple[PsychiatricNote, str, dict]:
+) -> tuple[PsychiatricNoteDraft, str, dict]:
     """Reserved for the future Whisper → text → Gemini pipeline."""
     client = _client()
     prompt = build_user_prompt(few_shot_examples, transcript=transcript, klasyfikacja=klasyfikacja)

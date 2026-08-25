@@ -124,13 +124,17 @@ def note_to_text(
         for k in kody:
             code = (k.get("code") or "").strip()
             desc = (k.get("description") or "").strip()
-            conf = k.get("confidence")
-            line = f"- {code}"
+            line = f"- {code}" if code else "- (brak kodu)"
             if desc:
                 line += f" — {desc}"
-            if conf is not None:
-                line += f" (pewność {float(conf):.2f})"
+            # Oznaczenie trafia też tutaj, bo ten tekst lekarz wkleja do dokumentacji.
+            if not k.get("zweryfikowany"):
+                line += " [DO WERYFIKACJI]"
             lines.append(line)
+        if any(not k.get("zweryfikowany") for k in kody):
+            lines.append(
+                "  Pozycje [DO WERYFIKACJI] nie zostały potwierdzone w rejestrze WHO."
+            )
         lines.append("")
 
     zalecenia = note.get("zalecenia") or []

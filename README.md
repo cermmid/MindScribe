@@ -79,6 +79,27 @@ Każdy push do tego brancha automatycznie redeployuje apkę.
 - **~1 GB RAM, 1 CPU**. Wystarczy dla jednego lekarza i plików do ~200 MB.
 - **Brak BAA z Google**. ZERO realnych danych pacjentów na tym deploy'u. Fikcyjne nagrania tylko.
 
+## Weryfikacja rozpoznań w rejestrze WHO
+
+**Model językowy nie może być źródłem kodów rozpoznań.** W testach podał kody ICD-11, które *istnieją*, ale znaczą co innego niż twierdził — np. `QE80` („ofiara przestępstwa lub terroryzmu") opisane jako zaburzenia snu, czy `6A70` (pojedynczy epizod depresyjny) podane jako lęk uogólniony. Walidacja formatu tego nie wykryje, bo kody są prawdziwe. ICD-11 obowiązuje dopiero od 2022 i jest w danych treningowych nieporównanie słabiej reprezentowana niż ICD-10, więc mapowanie kod ↔ znaczenie jest u modelu niepewne.
+
+Dlatego kody przechodzą przez oficjalne API WHO:
+
+1. model podaje przede wszystkim **nazwę rozpoznania**, a kod tylko gdy jest go pewien,
+2. aplikacja potwierdza kod w rejestrze i **zastępuje opis oficjalnym tytułem WHO**, więc para kod–opis nie może się rozjechać,
+3. gdy kodu brak lub nie istnieje — szuka po nazwie rozpoznania,
+4. czego nie da się potwierdzić, trafia do notatki oznaczone jako **niezweryfikowane**, także w tekście do skopiowania (`[DO WERYFIKACJI]`).
+
+### Konfiguracja (5 min)
+
+1. Załóż konto na https://icd.who.int/icdapi (darmowe).
+2. Zakładka **API Access Keys** → **Create new key**.
+3. Wpisz `ICD_CLIENT_ID` i `ICD_CLIENT_SECRET` do sekretów.
+
+Bez tych kluczy aplikacja **działa normalnie**, ale każde rozpoznanie jest oznaczane jako niezweryfikowane — awaria API czy brak konfiguracji nigdy nie przerywa generowania notatki.
+
+⚠️ Weryfikacja potwierdza, że **kod istnieje i co oznacza**. Nie potwierdza, że rozpoznanie jest trafne klinicznie — to zawsze decyzja lekarza.
+
 ## Panel właściciela (koszty i statystyki)
 
 Lekarze **nie widzą** kosztów ani zużycia tokenów — te dane są dalej zbierane i zapisywane, ale pokazywane wyłącznie w osobnej aplikacji:

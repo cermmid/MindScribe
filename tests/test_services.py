@@ -81,15 +81,22 @@ class TestSplitLines:
 
 
 class TestCleanIcdRows:
-    def test_drops_rows_with_blank_code(self):
-        """Wiersz-zaślepka z formularza nie może trafić do notatki."""
+    def test_drops_only_completely_empty_rows(self):
+        """Zaślepka formularza znika, ale rozpoznanie bez kodu zostaje.
+
+        Pusty kod jest teraz poprawny — kod dobierze rejestr WHO na podstawie nazwy,
+        a to bezpieczniejsze niż kod zgadnięty przez model.
+        """
         rows = [
             {"code": "F32.1", "description": "Epizod", "confidence": 0.8},
-            {"code": "   ", "description": "", "confidence": 0.0},
-            {"code": "", "description": "śmieć", "confidence": 0.5},
+            {"code": "   ", "description": "  ", "confidence": 0.0},
+            {"code": "", "description": "Zaburzenie lękowe", "confidence": 0.5},
         ]
         result = clean_icd_rows(rows)
-        assert [c.code for c in result] == ["F32.1"]
+        assert [(c.code, c.description) for c in result] == [
+            ("F32.1", "Epizod"),
+            ("", "Zaburzenie lękowe"),
+        ]
 
     def test_confidence_none_becomes_zero(self):
         result = clean_icd_rows([{"code": "F41.1", "confidence": None}])
