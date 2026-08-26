@@ -291,7 +291,7 @@ class TestApproveNoteFailsLoudly:
         from src.services import VisitNotUpdated, approve_note
 
         with pytest.raises(VisitNotUpdated):
-            approve_note(999_999, self._note())
+            approve_note(999_999, self._note(), doctor_id="user-a")
 
     def test_raises_when_visit_belongs_to_someone_else(self, temp_db):
         from src.services import VisitNotUpdated, approve_note
@@ -317,7 +317,7 @@ class TestApproveNoteFailsLoudly:
             doctor_id="user-a",
         )
         approve_note(visit_id, self._note(), doctor_id="user-a")
-        assert temp_db.get_visit(visit_id)["status"] == "approved"
+        assert temp_db.get_visit(visit_id, doctor_id="user-a")["status"] == "approved"
 
 
 class TestSplitRecommendations:

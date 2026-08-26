@@ -273,11 +273,11 @@ class CreatedVisit:
     few_shot_count: int = 0
 
 
-def load_few_shot_examples(doctor_id: str | None = None) -> list[dict[str, str]]:
-    """Zatwierdzone notatki zasilające few-shot.
+def load_few_shot_examples(doctor_id: str) -> list[dict[str, str]]:
+    """Zatwierdzone notatki TEJ osoby, zasilające few-shot.
 
-    `doctor_id` jest na razie przekazywane dalej bez filtrowania — separacja per
-    użytkownik wchodzi w fazie B razem z migracją na Postgresa.
+    Właściciel jest wymagany: to najgroźniejsze miejsce w całej aplikacji. Bez
+    filtra transkrypcja pacjenta jednej osoby trafiłaby do zapytania drugiej.
     """
     return get_approved_examples(doctor_id=doctor_id)
 
@@ -289,7 +289,8 @@ def create_visit_from_audio(
     audio_mime: str | None = None,
     visit_label: str | None = None,
     visit_type: str | None = None,
-    doctor_id: str | None = None,
+    doctor_id: str,
+    doctor_name: str | None = None,
     few_shot: list[dict[str, str]] | None = None,
     pipeline: str = "multimodal",
     klasyfikacje: list[str] | str = "ICD-10",
@@ -333,6 +334,7 @@ def create_visit_from_audio(
         visit_label=(visit_label or "").strip() or None,
         visit_type=visit_type,
         doctor_id=doctor_id,
+        doctor_name=doctor_name,
         usage=usage,
     )
     return CreatedVisit(
@@ -400,7 +402,7 @@ class VisitNotUpdated(RuntimeError):
     """Zatwierdzenie nie zmieniło żadnego wiersza — wizyta nie istnieje albo nie należy do tej osoby."""
 
 
-def approve_note(visit_id: int, note: PsychiatricNote, *, doctor_id: str | None = None) -> None:
+def approve_note(visit_id: int, note: PsychiatricNote, *, doctor_id: str) -> None:
     """Zapisz zwalidowaną notatkę i oznacz wizytę jako zatwierdzoną.
 
     Wywoływać **wyłącznie** z obiektem, który przeszedł walidację `PsychiatricNote` —
@@ -451,7 +453,7 @@ def resolve_note_version(visit: Mapping[str, Any]) -> ResolvedNote:
     return ResolvedNote(note=note, source_json=source_json, is_corrected=bool(corrected))
 
 
-def get_visit_with_note(visit_id: int, *, doctor_id: str | None = None) -> tuple[dict[str, Any] | None, ResolvedNote | None]:
+def get_visit_with_note(visit_id: int, *, doctor_id: str) -> tuple[dict[str, Any] | None, ResolvedNote | None]:
     """Pobierz wizytę razem z rozstrzygniętą wersją notatki."""
     visit = get_visit(visit_id, doctor_id=doctor_id)
     if not visit:

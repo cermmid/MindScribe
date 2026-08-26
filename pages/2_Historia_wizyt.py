@@ -2,17 +2,17 @@ import json
 
 import streamlit as st
 
-from src.auth import require_password
+from src.auth import current_user_id, require_login
 from src.db import get_visit, list_visits
 from src.formatting import display_name, humanize_visits_df, note_to_text
 from src.services import resolve_note_version
 from src.ui import copy_button, render_note
 
 st.set_page_config(page_title="Historia wizyt — MindScribe", page_icon="📚", layout="wide")
-require_password()
+require_login()
 st.title("📚 Historia wizyt")
 
-visits = list_visits()
+visits = list_visits(doctor_id=current_user_id())
 if not visits:
     st.info("Brak zapisanych wizyt. Przejdź do **Nowa wizyta**, żeby wygenerować pierwszą notatkę.")
     st.stop()
@@ -34,14 +34,14 @@ selected_id = st.selectbox(
 )
 
 with st.expander("📂 Pokaż szczegóły wizyty", expanded=False):
-    visit = get_visit(selected_id)
+    visit = get_visit(selected_id, doctor_id=current_user_id())
     if not visit:
         st.warning("Nie znaleziono wizyty.")
     else:
         st.subheader(display_name(visit))
         st.caption(
             f"Utworzono: {visit['created_at']} · status: **{visit['status']}** · "
-            f"tryb: {visit['pipeline']} · prowadzący: {visit.get('doctor_id') or '_brak_'}"
+            f"tryb: {visit['pipeline']} · prowadzący: {visit.get('doctor_name') or '_brak_'}"
         )
 
         resolved = resolve_note_version(visit)
@@ -57,7 +57,7 @@ with st.expander("📂 Pokaż szczegóły wizyty", expanded=False):
                 title=display_name(visit),
                 visit_type=visit.get("visit_type"),
                 created_at=visit.get("created_at"),
-                doctor_name=visit.get("doctor_id"),
+                doctor_name=visit.get("doctor_name"),
             )
             copy_button(note_text, key=f"copy_hist_{selected_id}")
             with st.expander("📄 Pełny tekst (zaznacz i skopiuj ręcznie)", expanded=False):

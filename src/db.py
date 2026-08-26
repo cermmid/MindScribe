@@ -47,7 +47,11 @@ visits = sa.Table(
     sa.Column("ai_note_original_json", sa.Text, nullable=False),
     sa.Column("doctor_note_corrected_json", sa.Text),
     sa.Column("status", sa.Text, nullable=False, server_default="draft"),
+    # Klucz właściciela (stabilne `sub` od dostawcy tożsamości) i osobno nazwa
+    # do wyświetlania. Jedna kolumna nie może pełnić obu ról: `sub` jest
+    # nieczytelny, a nazwa bywa zmieniana i nie nadaje się na klucz.
     sa.Column("doctor_id", sa.Text),
+    sa.Column("doctor_name", sa.Text),
     sa.Column("visit_label", sa.Text),
     sa.Column("visit_type", sa.Text),
     sa.Column("prompt_tokens", sa.BigInteger, server_default="0"),
@@ -149,7 +153,8 @@ def insert_visit(
     pipeline: str,
     raw_transcript: str,
     ai_note_original_json: str,
-    doctor_id: str | None = None,
+    doctor_id: str,
+    doctor_name: str | None = None,
     visit_label: str | None = None,
     visit_type: str | None = None,
     usage: dict | None = None,
@@ -166,6 +171,7 @@ def insert_visit(
             ai_note_original_json=ai_note_original_json,
             status="draft",
             doctor_id=doctor_id,
+            doctor_name=doctor_name,
             visit_label=visit_label,
             visit_type=visit_type,
             prompt_tokens=int(usage.get("prompt_tokens", 0)),
@@ -185,15 +191,32 @@ def insert_visit(
         return conn.execute(stmt).scalar_one()
 
 
-def _owner_clause(doctor_id: str | None):
+class _AllUsers:
+    """Wartownik oznaczający ŚWIADOMY brak filtrowania po właścicielu."""
+
+    def __repr__(self) -> str:  # pragma: no cover - tylko dla czytelności błędów
+        return "ALL_USERS"
+
+
+ALL_USERS = _AllUsers()
+"""Jedyny sposób na pominięcie filtra właściciela — trzeba go podać jawnie."""
+
+
+def _owner_clause(doctor_id: str | _AllUsers):
     """Warunek własności wiersza.
 
-    `doctor_id=None` oznacza „bez filtrowania" i zachowuje zachowanie sprzed
-    wprowadzenia separacji per użytkownik. Krok B3 planu przełącza wywołania na
-    przekazywanie realnego identyfikatora — wtedy każdy widzi wyłącznie swoje wizyty.
+    Parametr jest **wymagany i zawodzi zamknięciem**. Wcześniej `None` znaczyło
+    „bez filtrowania", więc zapomniany argument cicho pokazywał cudze wizyty.
+    Teraz pominięcie to `TypeError` przy wywołaniu, a świadomy brak filtra wymaga
+    jawnego `ALL_USERS` — czyli widać go w kodzie i w przeglądzie zmian.
     """
-    if doctor_id is None:
+    if doctor_id is ALL_USERS:
         return sa.true()
+    if not doctor_id:
+        raise ValueError(
+            "Brak identyfikatora właściciela. Podaj identyfikator użytkownika "
+            "albo jawnie ALL_USERS, jeśli zapytanie ma naprawdę objąć wszystkich."
+        )
     return visits.c.doctor_id == doctor_id
 
 
@@ -202,7 +225,7 @@ def update_visit(
     *,
     doctor_note_corrected_json: str,
     status: str = "approved",
-    doctor_id: str | None = None,
+    doctor_id: str | _AllUsers,
 ) -> int:
     """Zapisz poprawioną notatkę. Zwraca liczbę zmienionych wierszy.
 
@@ -219,14 +242,14 @@ def update_visit(
         return conn.execute(stmt).rowcount
 
 
-def get_visit(visit_id: int, doctor_id: str | None = None) -> dict[str, Any] | None:
+def get_visit(visit_id: int, *, doctor_id: str | _AllUsers) -> dict[str, Any] | None:
     stmt = sa.select(visits).where(visits.c.id == visit_id, _owner_clause(doctor_id))
     with _conn() as conn:
         row = conn.execute(stmt).first()
         return _row(row) if row else None
 
 
-def list_visits(doctor_id: str | None = None) -> list[dict[str, Any]]:
+def list_visits(*, doctor_id: str | _AllUsers) -> list[dict[str, Any]]:
     stmt = (
         sa.select(
             visits.c.id,
@@ -236,6 +259,7 @@ def list_visits(doctor_id: str | None = None) -> list[dict[str, Any]]:
             visits.c.status,
             visits.c.pipeline,
             visits.c.doctor_id,
+            visits.c.doctor_name,
             visits.c.prompt_tokens,
             visits.c.output_tokens,
             visits.c.total_tokens,
@@ -263,7 +287,8 @@ def admin_user_stats() -> list[dict[str, Any]]:
     owner = sa.func.coalesce(visits.c.doctor_id, _UNKNOWN_OWNER)
     stmt = (
         sa.select(
-            owner.label("doctor"),
+            owner.label("doctor_id"),
+            sa.func.max(sa.func.coalesce(visits.c.doctor_name, owner)).label("doctor"),
             sa.func.count().label("visits"),
             sa.func.sum(sa.case((visits.c.status == "approved", 1), else_=0)).label("approved"),
             sa.func.coalesce(sa.func.sum(visits.c.audio_duration_seconds), 0.0).label(
@@ -316,7 +341,7 @@ def admin_visit_durations() -> list[dict[str, Any]]:
     stmt = sa.select(
         visits.c.id,
         visits.c.created_at,
-        sa.func.coalesce(visits.c.doctor_id, _UNKNOWN_OWNER).label("doctor"),
+        sa.func.coalesce(visits.c.doctor_name, visits.c.doctor_id, _UNKNOWN_OWNER).label("doctor"),
         visits.c.visit_type,
         visits.c.status,
         visits.c.audio_duration_seconds,
@@ -328,8 +353,9 @@ def admin_visit_durations() -> list[dict[str, Any]]:
 
 
 def get_approved_examples(
+    *,
+    doctor_id: str | _AllUsers,
     limit: int = FEW_SHOT_LIMIT,
-    doctor_id: str | None = None,
 ) -> list[dict[str, str]]:
     stmt = (
         sa.select(visits.c.raw_transcript, visits.c.doctor_note_corrected_json)

@@ -44,7 +44,7 @@ class TestRoundTrip:
 
     def test_insert_then_read_back(self, temp_db):
         visit_id = _insert(temp_db, visit_label="etykieta")
-        visit = temp_db.get_visit(visit_id)
+        visit = temp_db.get_visit(visit_id, doctor_id='user-a')
         assert visit is not None
         assert visit["visit_label"] == "etykieta"
         assert visit["status"] == "draft"
@@ -59,11 +59,11 @@ class TestRoundTrip:
         czyli osobne połączenie.
         """
         visit_id = _insert(temp_db)
-        assert any(v["id"] == visit_id for v in temp_db.list_visits())
+        assert any(v["id"] == visit_id for v in temp_db.list_visits(doctor_id='user-a'))
 
     def test_usage_metrics_are_persisted(self, temp_db):
         visit_id = _insert(temp_db)
-        visit = temp_db.get_visit(visit_id)
+        visit = temp_db.get_visit(visit_id, doctor_id='user-a')
         assert visit["prompt_tokens"] == 1000
         assert visit["prompt_audio_tokens"] == 900
         assert visit["audio_duration_seconds"] == pytest.approx(1800.0)
@@ -75,12 +75,12 @@ class TestRoundTrip:
             temp_db,
             usage={"prompt_audio_tokens": 50_000, "modality_known": False},
         )
-        assert temp_db.get_visit(visit_id)["prompt_audio_tokens"] == 0
+        assert temp_db.get_visit(visit_id, doctor_id='user-a')["prompt_audio_tokens"] == 0
 
     def test_update_marks_approved(self, temp_db, sample_note_json):
         visit_id = _insert(temp_db)
-        temp_db.update_visit(visit_id, doctor_note_corrected_json=sample_note_json)
-        visit = temp_db.get_visit(visit_id)
+        temp_db.update_visit(visit_id, doctor_note_corrected_json=sample_note_json, doctor_id='user-a')
+        visit = temp_db.get_visit(visit_id, doctor_id='user-a')
         assert visit["status"] == "approved"
         assert visit["doctor_note_corrected_json"] == sample_note_json
 
@@ -92,8 +92,8 @@ class TestOwnershipFiltering:
     def two_users(self, temp_db, sample_note_json):
         a = _insert(temp_db, doctor_id="user-a", visit_label="pacjent A")
         b = _insert(temp_db, doctor_id="user-b", visit_label="pacjent B")
-        temp_db.update_visit(a, doctor_note_corrected_json=sample_note_json)
-        temp_db.update_visit(b, doctor_note_corrected_json=sample_note_json)
+        temp_db.update_visit(a, doctor_note_corrected_json=sample_note_json, doctor_id='user-a')
+        temp_db.update_visit(b, doctor_note_corrected_json=sample_note_json, doctor_id='user-b')
         return a, b
 
     def test_list_visits_scoped_to_owner(self, temp_db, two_users):
@@ -124,7 +124,7 @@ class TestOwnershipFiltering:
             b, doctor_note_corrected_json='{"podsumowanie": "podmiana"}', doctor_id="user-a"
         )
         assert changed == 0, "nietrafiony właściciel musi dać zero zmienionych wierszy"
-        untouched = temp_db.get_visit(b)
+        untouched = temp_db.get_visit(b, doctor_id='user-b')
         assert "podmiana" not in (untouched["doctor_note_corrected_json"] or "")
 
     def test_update_reports_own_row_changed(self, temp_db, two_users):
@@ -135,25 +135,42 @@ class TestOwnershipFiltering:
         assert changed == 1
 
     def test_update_of_missing_visit_reports_nothing_changed(self, temp_db):
-        assert temp_db.update_visit(999_999, doctor_note_corrected_json="{}") == 0
+        assert temp_db.update_visit(999_999, doctor_note_corrected_json="{}", doctor_id="user-a") == 0
 
 
-class TestFailOpenDefault:
-    """Dokumentuje obecne zachowanie: brak `doctor_id` = brak filtrowania.
+class TestFailClosed:
+    """Brak właściciela musi być błędem, nie cichym „pokaż wszystko".
 
-    To jest **zamierzone tylko przejściowo**. Faza B zmienia domyślne zachowanie na
-    zawodzenie zamknięciem, bo dziś zapomniany argument to cichy wyciek danych.
-    Gdy to nastąpi, poniższe testy trzeba świadomie odwrócić — i o to chodzi.
+    To odwrócenie wcześniejszego zachowania. Wcześniej pominięty argument oznaczał
+    brak filtrowania, więc jedna zapomniana linia pokazywała cudze wizyty i nic
+    tego nie sygnalizowało. Teraz taka pomyłka wywala się przy wywołaniu.
     """
 
-    def test_list_visits_without_owner_returns_everything(self, temp_db):
+    def test_list_visits_requires_owner(self, temp_db):
+        with pytest.raises(TypeError):
+            temp_db.list_visits()
+
+    def test_get_visit_requires_owner(self, temp_db):
+        visit_id = _insert(temp_db)
+        with pytest.raises(TypeError):
+            temp_db.get_visit(visit_id)
+
+    def test_few_shot_requires_owner(self, temp_db):
+        with pytest.raises(TypeError):
+            temp_db.get_approved_examples()
+
+    def test_empty_owner_is_rejected(self, temp_db):
+        """Pusty string to typowy skutek niezalogowanej sesji — nie może przejść."""
+        with pytest.raises(ValueError):
+            temp_db.list_visits(doctor_id="")
+        with pytest.raises(ValueError):
+            temp_db.list_visits(doctor_id=None)
+
+    def test_all_users_must_be_explicit(self, temp_db):
+        """Świadomy brak filtra jest możliwy, ale musi być widoczny w kodzie."""
         _insert(temp_db, doctor_id="user-a")
         _insert(temp_db, doctor_id="user-b")
-        assert len(temp_db.list_visits()) == 2
-
-    def test_get_visit_without_owner_returns_any_row(self, temp_db):
-        visit_id = _insert(temp_db, doctor_id="user-b")
-        assert temp_db.get_visit(visit_id) is not None
+        assert len(temp_db.list_visits(doctor_id=temp_db.ALL_USERS)) == 2
 
 
 class TestAdminAggregates:
@@ -164,7 +181,7 @@ class TestAdminAggregates:
         a = _insert(temp_db, doctor_id="user-a")
         _insert(temp_db, doctor_id="user-a")
         _insert(temp_db, doctor_id="user-b")
-        temp_db.update_visit(a, doctor_note_corrected_json=sample_note_json)
+        temp_db.update_visit(a, doctor_note_corrected_json=sample_note_json, doctor_id='user-a')
         return temp_db
 
     def test_user_stats_group_by_owner(self, populated):
@@ -211,7 +228,7 @@ class TestMigration:
         visit_id = _insert(temp_db)
         temp_db.init_db()
         temp_db.init_db()
-        assert temp_db.get_visit(visit_id) is not None
+        assert temp_db.get_visit(visit_id, doctor_id="user-a") is not None
 
     def test_legacy_database_gains_new_columns(self, sqlite_db):
         """Baza sprzed `doctor_id` i kolumn czasu ma się zmigrować bez utraty wierszy."""
@@ -240,7 +257,7 @@ class TestMigration:
 
         db_module.init_db()
 
-        visit = db_module.get_visit(1)
+        visit = db_module.get_visit(1, doctor_id=db_module.ALL_USERS)
         assert visit is not None, "migracja zgubiła istniejący wiersz"
         for column in ("doctor_id", "prompt_audio_tokens", "audio_duration_seconds"):
             assert column in visit

@@ -1,13 +1,14 @@
 """Panel właściciela — użytkownicy, czas wizyt, koszty.
 
-Osobna aplikacja Streamlit, uruchamiana niezależnie od aplikacji dla lekarzy:
+Osobna aplikacja Streamlit, uruchamiana niezależnie od aplikacji dla specjalistów:
 
     streamlit run admin/app.py
 
-Chroniona własnym hasłem (`admin_password` w sekretach) — innym niż hasło lekarzy.
+Chroniona własnym hasłem (`admin_password`) — celowo osobnym mechanizmem niż
+logowanie specjalistów, bo panel widzi dane wszystkich.
 
 GRANICA DANYCH: panel pokazuje wyłącznie metadane i agregaty. Nigdy transkrypcji,
-treści notatek ani etykiet wizyt — właściciel aplikacji nie jest lekarzem prowadzącym
+treści notatek ani etykiet wizyt — właściciel aplikacji nie jest osobą prowadzącą
 tych pacjentów, więc wgląd w treść wizyty byłby udostępnieniem dokumentacji medycznej
 osobie nieuprawnionej.
 """
@@ -43,7 +44,7 @@ def _require_admin_password() -> None:
         st.error(
             "Brak `admin_password` w sekretach. Panel jest zablokowany.\n\n"
             "Ustaw go w `.streamlit/secrets.toml` albo w panelu Streamlit Cloud. "
-            "Użyj **innego** hasła niż `app_password` użytkowników."
+            "To osobne poświadczenie niż logowanie specjalistów — panel widzi dane wszystkich."
         )
         st.stop()
 

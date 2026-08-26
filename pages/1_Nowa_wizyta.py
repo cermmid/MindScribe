@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from src.audio import looks_silent
-from src.auth import current_doctor, require_password
+from src.auth import current_doctor, current_user_id, require_login
 from src.formatting import (
     audio_quality_label,
     audio_unusable,
@@ -22,7 +22,7 @@ from src.services import (
 from src.ui import copy_button, render_note
 
 st.set_page_config(page_title="Nowa wizyta — MindScribe", page_icon="🎙️", layout="wide")
-require_password()
+require_login()
 st.title("🎙️ Nowa wizyta")
 
 # --- 1. Dane wizyty ------------------------------------------------------------
@@ -106,7 +106,7 @@ if st.button(
     type="primary",
     disabled=audio_bytes is None or (_silent and not _force),
 ):
-    few_shot = load_few_shot_examples()
+    few_shot = load_few_shot_examples(current_user_id())
     _spinner_text = "Słucham nagrania i przygotowuję notatkę… to chwilę potrwa."
     if few_shot:
         _spinner_text = (
@@ -121,7 +121,8 @@ if st.button(
                 audio_mime=audio_mime,
                 visit_label=visit_label,
                 visit_type=visit_type,
-                doctor_id=current_doctor(),
+                doctor_id=current_user_id(),
+                doctor_name=current_doctor(),
                 few_shot=few_shot,
                 klasyfikacje=klasyfikacje,
             )
@@ -299,7 +300,9 @@ if "current_note" in st.session_state:
             st.stop()
 
         try:
-            approve_note(st.session_state["current_visit_id"], corrected)
+            approve_note(
+                st.session_state["current_visit_id"], corrected, doctor_id=current_user_id()
+            )
         except VisitNotUpdated as e:
             # Zapis nie doszedł do skutku — lepiej powiedzieć to wprost, niż pokazać
             # „zatwierdzono" i pozwolić zamknąć kartę z niezapisaną notatką.

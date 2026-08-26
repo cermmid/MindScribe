@@ -194,7 +194,7 @@ _COLUMN_RENAME: dict[str, str] = {
     "visit_label": "nazwa wizyty",
     "created_at": "utworzona",
     "visit_type": "pierwsza czy kolejna wizyta",
-    "doctor_id": "prowadzący",
+    "doctor_name": "prowadzący",
     "status": "status",
     "pipeline": "tryb",
 }

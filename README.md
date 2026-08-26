@@ -1,15 +1,17 @@
 # MindScribe
 
-MVP aplikacji webowej dla psychiatrów: nagranie wizyty → transkrypcja + ustrukturyzowana notatka medyczna (Gemini 2.5 Flash, Structured Outputs) → edycja i zatwierdzenie przez lekarza (Human-in-the-Loop) → zapis w SQLite.
+Aplikacja webowa dla **psychiatrów, psychologów i psychoterapeutów**: nagranie wizyty → transkrypcja i ustrukturyzowana notatka (Gemini 2.5 Flash, Structured Outputs) → korekta i zatwierdzenie przez specjalistę → zapis w bazie.
 
-Zatwierdzone notatki są automatycznie doklejane do kolejnych promptów jako **few-shot examples** (3 ostatnie), dzięki czemu model uczy się stylu danego lekarza w locie.
+Zatwierdzone notatki są doklejane do kolejnych promptów jako **few-shot examples** (3 ostatnie), więc model uczy się stylu konkretnej osoby. Każdy widzi wyłącznie swoje wizyty.
 
 ## Stack
 
 - **UI + backend**: Python 3.11+, Streamlit (multi-page)
 - **AI**: Gemini 2.5 Flash przez `google-genai` SDK, Structured Outputs (Pydantic → `response_schema`)
-- **Audio**: ścieżka A — plik audio uploadowany do Gemini Files API i analizowany multimodalnie (transkrypcja + notatka w jednym wywołaniu)
-- **DB**: SQLite (`data/mindscribe.db`)
+- **Audio**: przesyłane inline i analizowane multimodalnie (transkrypcja + notatka w jednym wywołaniu). Files API odpada — nie istnieje w Vertex AI
+- **Rozpoznania**: ICD-10 i ICD-11 potwierdzane w oficjalnym rejestrze WHO; DSM-5 obsługiwany, ale bez automatycznego potwierdzenia
+- **Baza**: PostgreSQL przez SQLAlchemy (lokalnie SQLite bez konfiguracji)
+- **Logowanie**: Auth0 przez natywne `st.login()`
 
 ## Uruchomienie lokalne
 
@@ -18,16 +20,18 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-cp .env.example .env
-# uzupełnij GEMINI_API_KEY w .env
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+# uzupełnij klucz Gemini oraz sekcje [auth] i [auth.auth0] — patrz niżej
 
 streamlit run app.py
 ```
 
-Aplikacja otworzy się w przeglądarce. W panelu po lewej dwie strony:
+Aplikacja otworzy się w przeglądarce. Po zalogowaniu w panelu po lewej dwie strony:
 
-1. **Nowa wizyta** — wgraj/nagraj audio, kliknij **Wygeneruj notatkę**, popraw pola, **Zatwierdź**.
-2. **Historia wizyt** — przegląd zapisanych wizyt, diff oryginału AI vs wersji lekarza.
+1. **Nowa wizyta** — nagraj albo wgraj audio, kliknij **Wygeneruj notatkę**, popraw pola, **Zatwierdź**.
+2. **Historia wizyt** — przegląd Twoich zapisanych wizyt.
+
+Panel właściciela (koszty, statystyki) to osobna aplikacja: `streamlit run admin/app.py`.
 
 ## Struktura
 
@@ -41,10 +45,15 @@ MindScribe/
 │   ├── config.py             # .env + stałe
 │   ├── schemas.py            # PsychiatricNote (Pydantic, response_schema dla Gemini)
 │   ├── prompts.py            # system prompt + builder few-shot
-│   ├── db.py                 # SQLite: visits, get_approved_examples(3)
-│   ├── audio.py              # zapis uploadu na dysk
-│   └── gemini_client.py      # generate_note_from_audio() — Files API + Structured Output
-└── data/                     # DB i nagrania (gitignored)
+│   ├── db.py                 # SQLAlchemy: visits, filtr właściciela, agregaty panelu
+│   ├── services.py           # przypadki użycia — bez zależności od UI
+│   ├── auth.py               # logowanie OIDC, tożsamość użytkownika
+│   ├── icd.py                # weryfikacja rozpoznań w rejestrze WHO
+│   ├── audio.py              # zapis uploadu, typ MIME, wykrywanie ciszy
+│   └── gemini_client.py      # generate_note_from_audio() — audio inline + Structured Output
+├── admin/app.py              # panel właściciela (osobne hasło)
+├── tests/                    # 113 testów; db też na Postgresie przez TEST_DATABASE_URL
+└── data/                     # lokalny SQLite i nagrania (gitignored)
 ```
 
 ## Deploy: link "kliknij i działa" dla lekarza (Streamlit Community Cloud)
@@ -64,20 +73,48 @@ Cel: wysyłasz lekarzowi *"hej, kliknij w ten link"* i wpisuje hasło — nic ni
    ```toml
    GEMINI_API_KEY = "..."
    GEMINI_MODEL = "gemini-2.5-flash"
-   app_password = "..."
+   # logowanie: patrz sekcja "Logowanie i separacja danych"
    ```
 5. **Deploy**. Po ~2 minutach apka żyje. Wysyłasz lekarzowi:
    > Link: https://mindscribe-mvp.streamlit.app
-   > Hasło: \<to z `app_password`\>
+   > Konto zakładasz sam przy pierwszym wejściu.
 
 Każdy push do tego brancha automatycznie redeployuje apkę.
 
 ### Ograniczenia darmowego hostingu — przeczytaj zanim wyślesz link
 
-- **Dane znikają przy restarcie.** Streamlit Cloud ma efemeryczny filesystem — SQLite (`data/mindscribe.db`) i wgrane nagrania kasują się przy redeployu i po dłuższej bezczynności. Few-shot examples też. To OK na pokazanie UX lekarzowi w jednej sesji; do trwałości potrzebny zewnętrzny Postgres (Supabase/Neon — w roadmapie).
-- **URL jest publiczny.** Bramka hasłowa (`src/auth.py`, snippet ze Streamlit docs) gate'uje wejście, ale każdy z linkiem zobaczy pole hasła — nadaj długie, losowe.
-- **~1 GB RAM, 1 CPU**. Wystarczy dla jednego lekarza i plików do ~200 MB.
+- **Nagrania znikają przy restarcie.** Streamlit Cloud ma efemeryczny dysk. Wizyty i konta są bezpieczne, bo baza jest zewnętrzna (patrz *Baza danych*), ale pliki audio z `data/audio/` kasują się przy redeployu. Nagranie i tak jest potrzebne wyłącznie na czas wygenerowania notatki.
+- **URL jest publiczny**, ale bez konta nie widać niczego — logowanie idzie przez Auth0.
+- **~1 GB RAM, 1 CPU**. Wystarczy kilku osobom i plikom do ~200 MB.
 - **Brak BAA z Google**. ZERO realnych danych pacjentów na tym deploy'u. Fikcyjne nagrania tylko.
+
+## Logowanie i separacja danych
+
+Każdy specjalista ma własne konto i **widzi wyłącznie swoje wizyty**. Logowanie idzie przez Auth0 natywnym `st.login()`, więc aplikacja nie przechowuje żadnych haseł, a sesja żyje w podpisanym ciasteczku — odświeżenie strony ani wygaszony ekran telefonu nie wylogowują.
+
+### Konfiguracja Auth0 (10 min)
+
+1. Konto na auth0.com → **Applications** → **Create Application** → typ **Regular Web Application**. Technologia „Python" (nie React ani inny SPA — te nie dostają Client Secret, a Streamlit go potrzebuje).
+2. W *Settings* aplikacji uzupełnij:
+   - **Allowed Callback URLs** — każdy adres, pod którym aplikacja działa, z końcówką `/oauth2callback`. To lista, więc wpisz oba: lokalny i produkcyjny.
+     ```
+     http://localhost:8501/oauth2callback, https://TWOJA-APKA.streamlit.app/oauth2callback
+     ```
+   - **Allowed Logout URLs** — te same adresy, ale **bez** `/oauth2callback`.
+3. Przepisz `Domain`, `Client ID` i `Client Secret` do sekretów (patrz `.streamlit/secrets.toml.example`). `server_metadata_url` to `https://TWOJA-DOMENA/.well-known/openid-configuration`.
+4. Wygeneruj `cookie_secret`: `python -c "import secrets; print(secrets.token_hex(32))"`.
+
+⚠️ `redirect_uri` w sekretach musi **dokładnie** odpowiadać adresowi wpisanemu w Auth0. Lokalnie i na produkcji są to dwa różne adresy — na Streamlit Cloud w sekretach wpisz ten produkcyjny.
+
+### Jak działa separacja
+
+Kluczem właściciela jest `st.user.sub` — stabilny identyfikator od dostawcy, nie e-mail (ten użytkownik może zmienić, tracąc dostęp do własnych wizyt). Nazwa do wyświetlania jest w osobnej kolumnie `doctor_name`.
+
+**Filtr właściciela zawodzi zamknięciem.** Parametr jest wymagany we wszystkich funkcjach czytających i piszących; pominięcie go to `TypeError`, a nie ciche „pokaż wszystko". Świadome zapytanie o wszystkich wymaga jawnego `ALL_USERS` — widocznego w kodzie i w przeglądzie zmian. Wcześniej domyślne `None` znaczyło „bez filtrowania", więc jedna zapomniana linia pokazywała cudze wizyty i nic tego nie sygnalizowało.
+
+Najważniejsze miejsce to few-shot: bez filtra zatwierdzone notatki wszystkich trafiałyby do promptu, czyli **transkrypcja pacjenta jednej osoby lądowałaby w zapytaniu drugiej**.
+
+Panel właściciela (`admin/app.py`) celowo widzi wszystkich — to jedyne miejsce bez filtra, chronione osobnym hasłem i ograniczone do metadanych.
 
 ## Baza danych
 
@@ -151,7 +188,7 @@ Lekarze **nie widzą** kosztów ani zużycia tokenów — te dane są dalej zbie
 streamlit run admin/app.py
 ```
 
-Panel wymaga sekretu `admin_password` (innego niż `app_password` lekarzy) i pokazuje:
+Panel wymaga sekretu `admin_password` — osobnego od logowania specjalistów — i pokazuje:
 
 - podsumowanie: liczba lekarzy, wizyt, łączny czas nagrań, koszt w PLN i średni koszt wizyty,
 - tabelę per lekarz: liczba wizyt, łączny i średni czas, koszt, ostatnia aktywność,
