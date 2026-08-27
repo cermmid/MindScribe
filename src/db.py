@@ -23,7 +23,9 @@ Trzy decyzje warte zapamiętania:
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -94,12 +96,46 @@ def reset_engine_cache() -> None:
     _engines.clear()
 
 
+class DatabaseUnavailable(RuntimeError):
+    """Nie udało się połączyć z bazą — z podpowiedzią, co najczęściej jest przyczyną."""
+
+
+_PASSWORD_IN_URL = re.compile(r"(://[^:/@]+:)[^@]*(@)")
+
+
+def _scrub(text: str) -> str:
+    """Usuń hasło z komunikatu — trafia on na ekran i do logów."""
+    return _PASSWORD_IN_URL.sub(r"\1***\2", text)
+
+
+@contextmanager
 def _conn():
     """Transakcja commitowana przy wyjściu z bloku `with`.
 
     Świadomie `begin()`, nie `connect()` — patrz punkt 1 w docstringu modułu.
+
+    Błędy połączenia zamieniamy na własny wyjątek z czytelnym opisem. Streamlit
+    ukrywa treść nieobsłużonych wyjątków („original error message is redacted"),
+    więc bez tego każdy problem z bazą wygląda tak samo i nie da się go zdiagnozować.
     """
-    return get_engine().begin()
+    try:
+        with get_engine().begin() as conn:
+            yield conn
+    except sa.exc.OperationalError as exc:
+        raise _unavailable(exc) from exc
+
+
+def _unavailable(exc: sa.exc.OperationalError) -> DatabaseUnavailable:
+    return DatabaseUnavailable(
+        "Nie udało się połączyć z bazą danych.\n\n"
+        "Najczęstsze przyczyny:\n"
+        "1. **Nieaktualne hasło w `DATABASE_URL`** — jeśli resetowałeś je w panelu bazy, "
+        "connection string w sekretach trzeba podmienić.\n"
+        "2. **Literówka albo obcięty adres** — sprawdź, czy skopiowałeś go w całości, "
+        "razem z `?sslmode=require`.\n"
+        "3. **Projekt bazy usunięty albo wstrzymany** w panelu dostawcy.\n\n"
+        f"Komunikat sterownika: {_scrub(str(exc.orig or exc))}"
+    )
 
 
 def _row(row) -> dict[str, Any]:
@@ -117,7 +153,10 @@ def _row(row) -> dict[str, Any]:
 
 def init_db() -> None:
     """Publiczne wejście: upewnij się, że schemat istnieje i jest kompletny."""
-    _ensure_schema(get_engine())
+    try:
+        _ensure_schema(get_engine())
+    except sa.exc.OperationalError as exc:
+        raise _unavailable(exc) from exc
 
 
 def _ensure_schema(engine: sa.Engine) -> None:

@@ -23,6 +23,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.db import (  # noqa: E402
+    DatabaseUnavailable,
     admin_daily_stats,
     admin_user_stats,
     admin_visit_durations,
@@ -65,7 +66,11 @@ def _require_admin_password() -> None:
 
 
 _require_admin_password()
-init_db()
+try:
+    init_db()
+except DatabaseUnavailable as exc:
+    st.error(str(exc))
+    st.stop()
 
 st.title("📊 Panel właściciela")
 

@@ -1,12 +1,16 @@
 import streamlit as st
 
 from src.auth import require_login
-from src.db import init_db
+from src.db import DatabaseUnavailable, init_db
 
 st.set_page_config(page_title="MindScribe", page_icon="🧠", layout="wide")
 require_login()
 
-init_db()
+try:
+    init_db()
+except DatabaseUnavailable as exc:
+    st.error(str(exc))
+    st.stop()
 
 st.title("🧠 MindScribe")
 st.subheader("Asystent specjalistów od zdrowia psychicznego")

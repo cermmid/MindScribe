@@ -2,6 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from src.audio import looks_silent
+from src.db import DatabaseUnavailable
 from src.auth import current_doctor, current_user_id, require_login
 from src.formatting import (
     audio_quality_label,
@@ -106,7 +107,11 @@ if st.button(
     type="primary",
     disabled=audio_bytes is None or (_silent and not _force),
 ):
-    few_shot = load_few_shot_examples(current_user_id())
+    try:
+        few_shot = load_few_shot_examples(current_user_id())
+    except DatabaseUnavailable as exc:
+        st.error(str(exc))
+        st.stop()
     _spinner_text = "Słucham nagrania i przygotowuję notatkę… to chwilę potrwa."
     if few_shot:
         _spinner_text = (
@@ -126,6 +131,9 @@ if st.button(
                 few_shot=few_shot,
                 klasyfikacje=klasyfikacje,
             )
+        except DatabaseUnavailable as exc:
+            st.error(str(exc))
+            st.stop()
         except Exception as e:
             st.error(f"Błąd wywołania Gemini: {e}")
             st.stop()
