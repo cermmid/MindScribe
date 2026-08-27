@@ -67,6 +67,8 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
                 conf = k.get("confidence")
                 suffix = f" _(pewność rozpoznania {float(conf):.2f})_" if conf is not None else ""
                 st.markdown(f"- {mark} **{code}** — {k.get('description', '')}{suffix}")
+                if oficjalna := (k.get("oficjalna_nazwa") or "").strip():
+                    st.caption(f"　↳ wg rejestru WHO: {oficjalna}")
                 if uwaga := (k.get("uwaga") or "").strip():
                     st.caption(f"　↳ {uwaga}")
 

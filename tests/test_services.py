@@ -335,8 +335,24 @@ class TestPromptCodeRequirement:
 
     def test_icd11_code_may_be_left_empty(self):
         prompt = build_user_prompt([], klasyfikacje=["ICD-11"], lookup_systems=["ICD-11"])
-        assert "możesz zostawić PUSTE" in prompt
-        assert "OBOWIĄZKOWE" not in prompt
+        assert "ICD-11 pole `code` możesz zostawić PUSTE" in prompt
+        assert "pole `code` jest **OBOWIĄZKOWE**" not in prompt
+
+    def test_english_term_demanded_for_looked_up_systems(self):
+        """Rejestr WHO nie zna polskich nazw — bez angielskiego terminu nic nie znajdziemy."""
+        prompt = build_user_prompt([], klasyfikacje=["ICD-11"], lookup_systems=["ICD-11"])
+        assert "`termin_wyszukiwania` jest **OBOWIĄZKOWE**" in prompt
+        assert "PO ANGIELSKU" in prompt
+
+    def test_no_english_term_demanded_when_nothing_is_looked_up(self):
+        prompt = build_user_prompt([], klasyfikacje=["ICD-10"], lookup_systems=["ICD-11"])
+        assert "termin_wyszukiwania" not in prompt
+
+    def test_description_is_always_polish(self):
+        """Nazwy DSM-5 są angielskie — mają zostać przetłumaczone, nie przepisane."""
+        prompt = build_user_prompt([], klasyfikacje=["DSM-5"], lookup_systems=["ICD-11"])
+        assert "PO POLSKU" in prompt
+        assert "przetłumacz je na polski" in prompt
 
     def test_mixed_request_states_both_rules(self):
         prompt = build_user_prompt(

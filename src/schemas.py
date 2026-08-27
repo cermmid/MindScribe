@@ -38,7 +38,18 @@ class ICDCode(BaseModel):
         ),
     )
     description: str = Field(
-        description="Pełna nazwa rozpoznania po polsku — wypełnij ZAWSZE, to na jej podstawie szukamy kodu."
+        description=(
+            "Pełna nazwa rozpoznania **PO POLSKU** — wypełnij ZAWSZE, także dla DSM-5. "
+            "Jeśli oryginalna nazwa jest angielska, przetłumacz ją na polski."
+        )
+    )
+    termin_wyszukiwania: str = Field(
+        default="",
+        description=(
+            "Ta sama nazwa rozpoznania **PO ANGIELSKU**, w brzmieniu używanym przez WHO "
+            "(np. Generalised anxiety disorder). Służy wyłącznie do odpytania rejestru — "
+            "rejestr WHO nie ma polskich tłumaczeń, więc bez tego pola nie znajdziemy kodu."
+        ),
     )
     confidence: float = Field(
         ge=0.0, le=1.0, description="Twoja pewność co do samego ROZPOZNANIA (nie kodu), 0.0-1.0"
@@ -65,6 +76,10 @@ class VerifiedICDCode(BaseModel):
     code: str = ""
     description: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Oficjalny tytuł z rejestru (po angielsku). Trzymamy go OBOK polskiej nazwy,
+    # zamiast nią podmieniać: lekarz czyta po polsku, ale rozjazd znaczenia zostaje
+    # widoczny — to właśnie on wyszedł przy QE80 opisanym jako zaburzenia snu.
+    oficjalna_nazwa: str = ""
     weryfikacja: StanWeryfikacji = StanWeryfikacji.NIESPRAWDZANY
     # Zachowane dla notatek zapisanych przed wprowadzeniem trzech stanów.
     zweryfikowany: bool = False

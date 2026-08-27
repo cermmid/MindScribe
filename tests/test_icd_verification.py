@@ -49,28 +49,52 @@ def _verify(proposals, **kwargs):
     return services.verify_icd_codes(proposals, **kwargs)
 
 
-class TestOfficialTitleWins:
-    def test_replaces_model_description_with_who_title(self, fake_who):
-        """Dokładnie zgłoszony błąd: QE80 to ofiara przestępstwa, nie zaburzenia snu."""
+class TestMeaningMismatchStaysVisible:
+    """Ochrona przed pomyleniem kodu ze znaczeniem — powód, dla którego to powstało.
+
+    Opis pokazujemy po polsku, więc porównywanie go z angielskim tytułem rejestru
+    nie miałoby sensu: różniłby się zawsze. Porównujemy dwa teksty angielskie —
+    termin, jakim model się posłużył, i oficjalny tytuł WHO.
+    """
+
+    def test_flags_code_whose_meaning_differs(self, fake_who):
+        """Zgłoszony błąd: QE80 to ofiara przestępstwa, nie zaburzenia snu."""
         fake_who(codes={"QE80": "Victim of crime or terrorism"})
 
         result = _verify(
-            [ICDCode(klasyfikacja="ICD-11", code="QE80", description="Problemy związane ze snem", confidence=0.7)],
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="QE80",
+                    description="Problemy związane ze snem",
+                    termin_wyszukiwania="Sleep problems",
+                    confidence=0.7,
+                )
+            ],
             klasyfikacja="ICD-11",
         )
 
         assert result[0].code == "QE80"
-        assert result[0].description == "Victim of crime or terrorism"
-        assert result[0].zweryfikowany is True
-        # Rozbieżność musi być widoczna, a nie po cichu poprawiona.
-        assert "Problemy związane ze snem" in result[0].uwaga
-        assert result[0].propozycja_ai == "Problemy związane ze snem"
+        # Lekarz czyta po polsku…
+        assert result[0].description == "Problemy związane ze snem"
+        # …ale oficjalne znaczenie jest widoczne obok i rozjazd jest zgłoszony.
+        assert result[0].oficjalna_nazwa == "Victim of crime or terrorism"
+        assert "Sleep problems" in result[0].uwaga
+        assert "Victim of crime or terrorism" in result[0].uwaga
 
-    def test_no_note_when_model_description_matches(self, fake_who):
+    def test_no_note_when_meaning_agrees(self, fake_who):
         fake_who(codes={"6B00": "Generalised anxiety disorder"})
 
         result = _verify(
-            [ICDCode(klasyfikacja="ICD-11", code="6B00", description="Generalised anxiety disorder", confidence=0.9)],
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="6B00",
+                    description="Zaburzenie lękowe uogólnione",
+                    termin_wyszukiwania="Generalised anxiety disorder",
+                    confidence=0.9,
+                )
+            ],
             klasyfikacja="ICD-11",
         )
         assert result[0].zweryfikowany is True
@@ -188,7 +212,52 @@ class TestIcd10Path:
             klasyfikacja="ICD-10",
         )
         assert result[0].weryfikacja.value == "POTWIERDZONY"
-        assert result[0].description == "Generalized anxiety disorder"
+        assert result[0].description == "Lęk uogólniony"
+        assert result[0].oficjalna_nazwa == "Generalized anxiety disorder"
+
+
+class TestPolishNameSurvivesLookup:
+    """Rejestr odpytujemy po angielsku, ale lekarz ma widzieć polską nazwę."""
+
+    def test_searches_with_english_term(self, fake_who):
+        fake_who(terms={"generalised anxiety disorder": ("6B00", "Generalised anxiety disorder")})
+        result = _verify(
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="",
+                    description="Zaburzenie lękowe uogólnione",
+                    termin_wyszukiwania="Generalised anxiety disorder",
+                    confidence=0.9,
+                )
+            ]
+        )
+        assert result[0].code == "6B00"
+        assert result[0].weryfikacja.value == "POTWIERDZONY"
+
+    def test_keeps_polish_description_after_confirmation(self, fake_who):
+        fake_who(codes={"6B00": "Generalised anxiety disorder"})
+        result = _verify(
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="6B00",
+                    description="Zaburzenie lękowe uogólnione",
+                    termin_wyszukiwania="Generalised anxiety disorder",
+                    confidence=0.9,
+                )
+            ]
+        )
+        assert result[0].description == "Zaburzenie lękowe uogólnione"
+        # Oficjalne brzmienie zostaje obok — to ono ujawnia rozjazd znaczenia.
+        assert result[0].oficjalna_nazwa == "Generalised anxiety disorder"
+
+    def test_falls_back_to_polish_when_english_term_missing(self, fake_who):
+        fake_who(terms={"zaburzenie lękowe uogólnione": ("6B00", "Generalised anxiety disorder")})
+        result = _verify(
+            [ICDCode(klasyfikacja="ICD-11", code="", description="Zaburzenie lękowe uogólnione", confidence=0.9)]
+        )
+        assert result[0].code == "6B00"
 
 
 class TestMultipleClassifications:

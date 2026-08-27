@@ -10,6 +10,16 @@ if TYPE_CHECKING:  # pandas jest potrzebny wyłącznie dla tabeli Streamlita (pa
     import pandas as pd
 
 
+def enum_value(value: Any) -> str:
+    """Wartość enuma jako tekst.
+
+    `str()` na elemencie `(str, Enum)` daje „Klasa.NAZWA", a nie samą wartość —
+    a `model_dump()` zwraca właśnie elementy enuma. Bez tego porównania po tekście
+    cicho nie trafiają i wpadamy w gałąź zapasową.
+    """
+    return str(getattr(value, "value", value) or "")
+
+
 def visit_type_label(visit_type: str | None) -> str:
     v = (visit_type or "").strip().lower()
     if v.startswith("pierw"):
@@ -47,9 +57,9 @@ def classifications_of(note: dict[str, Any]) -> list[str]:
     """
     many = note.get("klasyfikacje")
     if isinstance(many, list) and many:
-        return [str(k) for k in many if k]
+        return [enum_value(k) for k in many if k]
     single = note.get("klasyfikacja")
-    return [str(single)] if single else ["ICD-10"]
+    return [enum_value(single)] if single else ["ICD-10"]
 
 
 def classification_label(note: dict[str, Any]) -> str:
@@ -63,7 +73,7 @@ def group_codes_by_classification(note: dict[str, Any]) -> dict[str, list[dict[s
     order = classifications_of(note)
     grouped: dict[str, list[dict[str, Any]]] = {}
     for code in codes:
-        key = str(code.get("klasyfikacja") or "").strip() or (order[0] if order else "ICD-10")
+        key = enum_value(code.get("klasyfikacja")).strip() or (order[0] if order else "ICD-10")
         grouped.setdefault(key, []).append(code)
     # Najpierw klasyfikacje zamówione przez lekarza, potem ewentualne pozostałe.
     ordered = {k: grouped[k] for k in order if k in grouped}
@@ -77,7 +87,7 @@ def verification_state(code: dict[str, Any]) -> str:
     Starsze wpisy mają tylko `zweryfikowany` — `True` mapujemy na potwierdzony,
     `False` na niepotwierdzony, bo wtedy brak potwierdzenia zawsze znaczył próbę.
     """
-    state = str(code.get("weryfikacja") or "").upper()
+    state = enum_value(code.get("weryfikacja")).upper()
     if state in {"POTWIERDZONY", "NIESPRAWDZANY", "NIEPOTWIERDZONY"}:
         return state
     return "POTWIERDZONY" if code.get("zweryfikowany") else "NIEPOTWIERDZONY"

@@ -154,6 +154,8 @@ def verify_icd_codes(
             item = ICDCode(**data)
         proposed_name = (item.description or "").strip()
         proposed_code = (item.code or "").strip()
+        # Rejestr WHO nie zna polskich nazw — szukamy po angielskim terminie od modelu.
+        search_term = (getattr(item, "termin_wyszukiwania", "") or "").strip() or proposed_name
         system = _normalize_klasyfikacja(item.klasyfikacja)
         icd11 = system == "ICD-11"
 
@@ -196,8 +198,8 @@ def verify_icd_codes(
         try:
             match = icd.lookup_code(proposed_code, icd11=icd11) if proposed_code else None
             searched = None
-            if match is None and proposed_name:
-                candidates = icd.search(proposed_name, icd11=icd11)
+            if match is None and search_term:
+                candidates = icd.search(search_term, icd11=icd11, language="en")
                 searched = candidates[0] if candidates else None
         except icd.IcdUnavailable as exc:
             api_down_note = (
@@ -208,18 +210,28 @@ def verify_icd_codes(
             continue
 
         if match is not None:
+            # Rozjazd wykrywamy porównując ANGIELSKI termin modelu z angielskim tytułem
+            # rejestru. Polskiej nazwy nie da się z nim sensownie porównać — różniłaby
+            # się zawsze, bo to inny język, więc sygnał byłby bezwartościowy.
             note = ""
-            if proposed_name and _differs(proposed_name, match.title):
-                note = f"Model opisał ten kod jako „{proposed_name}” — oficjalnie to „{match.title}”."
+            if search_term and _differs(search_term, match.title):
+                note = (
+                    f"Model rozumiał ten kod jako „{search_term}”, a w rejestrze to "
+                    f"„{match.title}”. Sprawdź, czy kod pasuje do rozpoznania."
+                )
             results.append(
                 VerifiedICDCode(
                     klasyfikacja=system,
                     code=match.code,
-                    description=match.title,
+                    # Lekarz czyta po polsku, więc nazwa od modelu zostaje. Oficjalne
+                    # brzmienie z rejestru idzie OBOK — to ono ujawnia rozjazd kodu
+                    # ze znaczeniem, jak przy QE80 opisanym jako zaburzenia snu.
+                    description=proposed_name or match.title,
+                    oficjalna_nazwa=match.title,
                     confidence=item.confidence,
                     weryfikacja=StanWeryfikacji.POTWIERDZONY,
                     zweryfikowany=True,
-                    propozycja_ai=proposed_name if note else "",
+                    propozycja_ai=search_term if note else "",
                     uwaga=note,
                 )
             )
@@ -234,11 +246,11 @@ def verify_icd_codes(
                 VerifiedICDCode(
                     klasyfikacja=system,
                     code=searched.code,
-                    description=searched.title,
+                    description=proposed_name or searched.title,
+                    oficjalna_nazwa=searched.title,
                     confidence=item.confidence,
                     weryfikacja=StanWeryfikacji.POTWIERDZONY,
                     zweryfikowany=True,
-                    propozycja_ai=proposed_name,
                     uwaga=note,
                 )
             )

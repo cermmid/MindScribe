@@ -78,7 +78,8 @@ def build_user_prompt(
             "w polu `klasyfikacja` tę właściwą. Nie pomijaj żadnej i nie mieszaj kodów między nimi."
         )
     rule.append(
-        "Najważniejsza jest **nazwa rozpoznania** (`description`) — wypełnij ją zawsze i precyzyjnie."
+        "Pole `description` to nazwa rozpoznania **PO POLSKU** — wypełnij je zawsze, dla każdej "
+        "klasyfikacji. Nazwy DSM-5 są angielskie: przetłumacz je na polski, nie przepisuj."
     )
 
     # Kod wolno pominąć TYLKO tam, gdzie aplikacja sama go ustali z rejestru.
@@ -95,8 +96,14 @@ def build_user_prompt(
     if checked:
         rule.append(
             f"Dla {', '.join(checked)} pole `code` możesz zostawić PUSTE, jeśli nie masz pewności — "
-            "kod zostanie ustalony w oficjalnym rejestrze WHO na podstawie nazwy, a każdy podany "
-            "kod i tak jest tam sprawdzany. Tutaj zgadywanie nic nie daje."
+            "kod zostanie ustalony w oficjalnym rejestrze WHO, a każdy podany kod i tak jest tam "
+            "sprawdzany. Tutaj zgadywanie nic nie daje."
+        )
+        rule.append(
+            f"Za to dla {', '.join(checked)} pole `termin_wyszukiwania` jest **OBOWIĄZKOWE**: wpisz "
+            "tam tę samą nazwę rozpoznania PO ANGIELSKU, w brzmieniu WHO, "
+            "na przykład: Generalised anxiety disorder. "
+            "Rejestr WHO nie zna polskich nazw — po polsku nie znajdziemy niczego."
         )
     if "DSM-5" in wanted:
         rule.append(
