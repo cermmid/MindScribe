@@ -1,4 +1,5 @@
 streamlit>=1.42          # 1.42+ wymagane przez st.login (OIDC)
+Authlib>=1.3.2           # opcjonalna zależność st.login — bez niej StreamlitMissingAuthlibError
 google-genai>=0.3
 pydantic>=2.7
 python-dotenv>=1.0
