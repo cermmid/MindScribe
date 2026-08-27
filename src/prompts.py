@@ -94,10 +94,15 @@ def build_user_prompt(
             "dla specjalisty bezużyteczny."
         )
     if checked:
+        # Wcześniej ta reguła pozwalała zostawić kod pusty, bo „rejestr go uzupełni".
+        # Gdy rejestr czegoś nie znajdzie albo jest nieosiągalny, wpis zostaje bez kodu
+        # i jest dla specjalisty bezwartościowy. Kod ma być zawsze — rejestr go
+        # potwierdza albo poprawia, a niepotwierdzony jest wyraźnie oznaczony.
         rule.append(
-            f"Dla {', '.join(checked)} pole `code` możesz zostawić PUSTE, jeśli nie masz pewności — "
-            "kod zostanie ustalony w oficjalnym rejestrze WHO, a każdy podany kod i tak jest tam "
-            "sprawdzany. Tutaj zgadywanie nic nie daje."
+            f"Dla {', '.join(checked)} pole `code` też wypełnij — podaj swój najlepszy kod. "
+            "Zostanie sprawdzony w oficjalnym rejestrze WHO i w razie potrzeby poprawiony, "
+            "a jeśli nie da się go potwierdzić, specjalista zobaczy wyraźne ostrzeżenie. "
+            "Nie zmyślaj jednak kodu na siłę: gdy naprawdę nie masz pojęcia, zostaw pole puste."
         )
         rule.append(
             f"Za to dla {', '.join(checked)} pole `termin_wyszukiwania` jest **OBOWIĄZKOWE**: wpisz "

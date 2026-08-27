@@ -196,7 +196,13 @@ def verify_icd_codes(
             continue
 
         try:
-            match = icd.lookup_code(proposed_code, icd11=icd11) if proposed_code else None
+            # Też po angielsku: `oficjalna_nazwa` i porównanie rozjazdu niżej mają
+            # sens tylko wtedy, gdy obie strony są w tym samym języku.
+            match = (
+                icd.lookup_code(proposed_code, icd11=icd11, language="en")
+                if proposed_code
+                else None
+            )
             searched = None
             if match is None and search_term:
                 candidates = icd.search(search_term, icd11=icd11, language="en")

@@ -26,6 +26,30 @@ def _line(ok: bool, text: str) -> None:
     print(f"{'✅' if ok else '❌'} {text}")
 
 
+def _dump_trace(trace: list[dict]) -> None:
+    """Pokaż każdą próbę odpytania wyszukiwarki — to z tego wynika, gdzie jest problem.
+
+    Rozróżnienie, na którym najbardziej zależy: „zapytanie się nie udało" (błąd HTTP,
+    zły adres) to co innego niż „zapytanie się udało, ale nic nie zwróciło", a jedno
+    i drugie kończy się w aplikacji tak samo — brakiem kodu.
+    """
+    if not trace:
+        return
+    print("      ── próby zapytań ──")
+    for attempt in trace:
+        head = (
+            f"      {attempt['path']} [{attempt['language']}, "
+            f"flexisearch={attempt['flexisearch']}]"
+        )
+        if error := attempt.get("error"):
+            print(f"{head} → BŁĄD: {error}")
+        else:
+            print(
+                f"{head} → encji: {attempt.get('entities', 0)}, "
+                f"z kodem: {attempt.get('matches', 0)}"
+            )
+
+
 def main() -> int:
     print("Sprawdzam integrację z rejestrem WHO ICD…\n")
 
@@ -50,25 +74,37 @@ def main() -> int:
         return 1
     _line(True, f"Token pobrany (długość {len(token)} znaków).")
 
-    # --- ICD-11: wyszukiwanie po nazwie ---
-    term = "generalised anxiety disorder"
-    try:
-        matches = icd.search(term, icd11=True)
-    except icd.IcdUnavailable as exc:
-        _line(False, f"Wyszukiwanie ICD-11 nie zadziałało: {exc}")
-        return 1
-    if matches:
-        _line(True, f"ICD-11, wyszukiwanie „{term}” → {len(matches)} trafień:")
-        for m in matches[:5]:
-            print(f"      {m.code:<10} {m.title}")
+    # --- ICD-11: które wydanie widzimy ---
+    release = icd._release_id()
+    if release:
+        _line(True, f"Najnowsze wydanie ICD-11 wg WHO: {release}")
     else:
-        _line(False, f"ICD-11: brak trafień dla „{term}” — to podejrzane.")
+        _line(False, "Nie udało się ustalić numeru wydania ICD-11 (zostaje adres bez numeru).")
+    print(f"      adres linearyzacji: {icd.BASE_URL}/{icd._mms_prefix()}")
+
+    # --- ICD-11: wyszukiwanie po nazwie ---
+    # Szukamy po angielsku, bo tak robi aplikacja — rejestr WHO nie ma polskich nazw.
+    for term in ("generalised anxiety disorder", "recurrent depressive disorder"):
+        trace: list[dict] = []
+        try:
+            matches = icd.search(term, icd11=True, language="en", trace=trace)
+        except icd.IcdUnavailable as exc:
+            _line(False, f"Wyszukiwanie ICD-11 „{term}” nie zadziałało: {exc}")
+            _dump_trace(trace)
+            return 1
+        if matches:
+            _line(True, f"ICD-11, wyszukiwanie „{term}” → {len(matches)} trafień:")
+            for m in matches[:5]:
+                print(f"      {m.code:<10} {m.title}")
+        else:
+            _line(False, f"ICD-11: brak trafień dla „{term}” — to podejrzane.")
+        _dump_trace(trace)
 
     # --- ICD-11: sprawdzenie konkretnego kodu ---
     # 6B00 to zaburzenie lękowe uogólnione; 6A70 to POJEDYNCZY EPIZOD DEPRESYJNY.
     for code in ("6B00", "6A70", "QE80"):
         try:
-            hit = icd.lookup_code(code, icd11=True)
+            hit = icd.lookup_code(code, icd11=True, language="en")
         except icd.IcdUnavailable as exc:
             _line(False, f"ICD-11, sprawdzenie {code}: {exc}")
             continue
@@ -91,7 +127,9 @@ def main() -> int:
 
     print(
         "\nJeśli powyżej są same ✅, wpisz te same klucze do sekretów aplikacji\n"
-        "i zrestartuj ją — kody rozpoznań zaczną dostawać znacznik potwierdzenia."
+        "i zrestartuj ją — kody rozpoznań zaczną dostawać znacznik potwierdzenia.\n"
+        "\nJeśli ICD-11 nie znajduje nic, przeklej całe wyjście razem z sekcjami\n"
+        "z próbami zapytań — widać w nich, czy zapytanie w ogóle doszło do WHO."
     )
     return 0
 

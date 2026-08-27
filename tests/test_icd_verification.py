@@ -31,7 +31,7 @@ def fake_who(monkeypatch):
             title = codes.get((code or "").upper())
             return icd.IcdMatch(code=code.upper(), title=title) if title else None
 
-        def search(term, *, icd11=True, language="pl"):
+        def search(term, *, icd11=True, language="pl", trace=None):
             counters["search"] += 1
             if fail:
                 raise icd.IcdUnavailable("brak sieci")
@@ -341,3 +341,150 @@ class TestLanguageFallback:
 
     def test_english_has_no_duplicate_fallback(self):
         assert icd._language_order("en") == ["en"]
+
+
+@pytest.fixture
+def who_endpoint(monkeypatch):
+    """Podstaw warstwę HTTP modułu `icd` i zapamiętaj, o co dokładnie pytał.
+
+    Testujemy tu samo odpytywanie rejestru, więc podmieniamy `_get` (jedyne miejsce,
+    w którym moduł dotyka sieci) i token, żeby nie było potrzeby poświadczeń.
+    """
+
+    def _install(routes):
+        calls: list[tuple[str, dict]] = []
+
+        def fake_get(path, *, language, params=None):
+            calls.append((path, dict(params or {})))
+            handler = routes.get(path)
+            if handler is None:
+                return None
+            return handler(params or {}, language) if callable(handler) else handler
+
+        monkeypatch.setattr(icd, "_access_token", lambda: "token-testowy")
+        monkeypatch.setattr(icd, "_get", fake_get)
+        monkeypatch.setitem(icd._release_cache, "id", "")
+        return calls
+
+    return _install
+
+
+class TestReleaseResolution:
+    def test_uses_release_id_from_payload(self, who_endpoint):
+        who_endpoint({icd.ICD11_LINEARIZATION: {"releaseId": "2025-01"}})
+        assert icd._release_id() == "2025-01"
+        assert icd._mms_prefix() == "release/11/2025-01/mms"
+
+    def test_falls_back_to_uri(self, who_endpoint):
+        who_endpoint(
+            {icd.ICD11_LINEARIZATION: {"@id": "http://id.who.int/icd/release/11/2024-01/mms"}}
+        )
+        assert icd._release_id() == "2024-01"
+
+    def test_unknown_release_keeps_unpinned_address(self, who_endpoint):
+        who_endpoint({})
+        assert icd._release_id() == ""
+        assert icd._mms_prefix() == icd.ICD11_LINEARIZATION
+
+
+class TestIcd11Search:
+    def test_prefers_pinned_release_address(self, who_endpoint):
+        calls = who_endpoint(
+            {
+                icd.ICD11_LINEARIZATION: {"releaseId": "2025-01"},
+                "release/11/2025-01/mms/search": {
+                    "destinationEntities": [
+                        {"theCode": "6B00", "title": "<em>Generalised</em> anxiety disorder"}
+                    ]
+                },
+            }
+        )
+        assert icd.search("anxiety", language="en") == [
+            icd.IcdMatch(code="6B00", title="Generalised anxiety disorder")
+        ]
+        assert calls[-1][0] == "release/11/2025-01/mms/search"
+
+    def test_falls_back_to_flexisearch(self, who_endpoint):
+        def handler(params, _language):
+            if params.get("useFlexisearch") != "true":
+                return {"destinationEntities": []}
+            return {"destinationEntities": [{"theCode": "6A70", "title": "Depressive disorder"}]}
+
+        calls = who_endpoint({icd.ICD11_LINEARIZATION + "/search": handler})
+        assert icd.search("depresja", language="en")[0].code == "6A70"
+        searches = [params["useFlexisearch"] for path, params in calls if path.endswith("/search")]
+        assert searches == ["false", "true"]
+
+    def test_resolves_code_for_entities_without_the_code(self, who_endpoint):
+        """Encje z wyszukiwarki bez `theCode` były wcześniej po cichu wyrzucane."""
+        who_endpoint(
+            {
+                icd.ICD11_LINEARIZATION: {"releaseId": "2025-01"},
+                "release/11/2025-01/mms/search": {
+                    "destinationEntities": [
+                        {"id": "http://id.who.int/icd/entity/1635750499", "title": "Anxiety"}
+                    ]
+                },
+                "release/11/2025-01/mms/1635750499": {
+                    "code": "6B00",
+                    "title": {"@value": "Generalised anxiety disorder"},
+                },
+            }
+        )
+        assert icd.search("anxiety", language="en") == [
+            icd.IcdMatch(code="6B00", title="Generalised anxiety disorder")
+        ]
+
+    def test_empty_result_is_not_an_error(self, who_endpoint):
+        who_endpoint({icd.ICD11_LINEARIZATION + "/search": {"destinationEntities": []}})
+        assert icd.search("nieistniejące rozpoznanie", language="en") == []
+
+    def test_total_failure_raises_instead_of_reporting_no_hits(self, who_endpoint, monkeypatch):
+        """Rejestr niedostępny to co innego niż „nie ma takiego rozpoznania"."""
+
+        def boom(path, *, language, params=None):
+            raise icd.IcdUnavailable("WHO odpowiedziało 500.")
+
+        monkeypatch.setattr(icd, "_access_token", lambda: "token-testowy")
+        monkeypatch.setattr(icd, "_get", boom)
+        monkeypatch.setitem(icd._release_cache, "id", "")
+        with pytest.raises(icd.IcdUnavailable):
+            icd.search("anxiety", language="en")
+
+    def test_trace_records_every_attempt(self, who_endpoint):
+        who_endpoint({icd.ICD11_LINEARIZATION + "/search": {"destinationEntities": []}})
+        trace: list[dict] = []
+        icd.search("anxiety", language="en", trace=trace)
+        assert trace and all(entry["path"].endswith("/search") for entry in trace)
+        assert {entry["flexisearch"] for entry in trace} == {"false", "true"}
+
+
+class TestIcd11CodeLookup:
+    def test_uses_codeinfo(self, who_endpoint):
+        calls = who_endpoint(
+            {
+                icd.ICD11_LINEARIZATION: {"releaseId": "2025-01"},
+                "release/11/2025-01/mms/codeinfo/6B00": {
+                    "stemId": "http://id.who.int/icd/release/11/2025-01/mms/1635750499"
+                },
+                "release/11/2025-01/mms/1635750499": {
+                    "code": "6B00",
+                    "title": "Generalised anxiety disorder",
+                },
+            }
+        )
+        hit = icd.lookup_code("6B00", icd11=True, language="en")
+        assert hit == icd.IcdMatch(code="6B00", title="Generalised anxiety disorder")
+        assert any("codeinfo" in path for path, _ in calls)
+
+    def test_unknown_code_returns_none(self, who_endpoint):
+        who_endpoint({icd.ICD11_LINEARIZATION + "/search": {"destinationEntities": []}})
+        assert icd.lookup_code("XX99", icd11=True, language="en") is None
+
+
+class TestApiErrorPayload:
+    def test_http_200_with_error_flag_is_reported(self):
+        assert icd._api_error({"error": True, "errorMessage": "zła fraza"}) == "zła fraza"
+
+    def test_normal_payload_has_no_error(self):
+        assert icd._api_error({"destinationEntities": []}) == ""

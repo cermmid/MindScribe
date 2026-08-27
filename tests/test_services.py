@@ -333,9 +333,12 @@ class TestPromptCodeRequirement:
         assert "ICD-10 pole `code` jest **OBOWIĄZKOWE**" in prompt
         assert "możesz zostawić PUSTE" not in prompt
 
-    def test_icd11_code_may_be_left_empty(self):
+    def test_looked_up_system_still_asks_for_a_code(self):
+        """Pusty kod to wpis bezużyteczny, gdy rejestr zawiedzie — model ma podać swój."""
         prompt = build_user_prompt([], klasyfikacje=["ICD-11"], lookup_systems=["ICD-11"])
-        assert "ICD-11 pole `code` możesz zostawić PUSTE" in prompt
+        assert "ICD-11 pole `code` też wypełnij" in prompt
+        assert "poprawiony" in prompt
+        # …ale bez przymusu, żeby nie zachęcać do zmyślania kodu na siłę.
         assert "pole `code` jest **OBOWIĄZKOWE**" not in prompt
 
     def test_english_term_demanded_for_looked_up_systems(self):
@@ -359,14 +362,15 @@ class TestPromptCodeRequirement:
             [], klasyfikacje=["ICD-10", "ICD-11"], lookup_systems=["ICD-11"]
         )
         assert "ICD-10 pole `code` jest **OBOWIĄZKOWE**" in prompt
-        assert "ICD-11 pole `code` możesz zostawić PUSTE" in prompt
+        assert "ICD-11 pole `code` też wypełnij" in prompt
 
-    def test_icd10_may_be_empty_when_lookup_enabled(self):
-        """Po włączeniu VERIFY_ICD10 wraca stara reguła."""
+    def test_icd10_switches_rule_when_lookup_enabled(self):
+        """Po włączeniu VERIFY_ICD10 ICD-10 przechodzi pod regułę klasyfikacji sprawdzanych."""
         prompt = build_user_prompt(
             [], klasyfikacje=["ICD-10"], lookup_systems=["ICD-11", "ICD-10"]
         )
-        assert "możesz zostawić PUSTE" in prompt
+        assert "ICD-10 pole `code` też wypełnij" in prompt
+        assert "jest **OBOWIĄZKOWE**" not in prompt.split("`termin_wyszukiwania`")[0]
 
 
 class TestSplitRecommendations:
