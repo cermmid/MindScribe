@@ -21,6 +21,7 @@ from src.formatting import (
     note_to_text,
 )
 from src.pricing import estimate_audio_seconds, format_duration
+from src.prompts import build_user_prompt
 from src.services import (
     build_corrected_note,
     clean_icd_rows,
@@ -317,6 +318,39 @@ class TestApproveNoteFailsLoudly:
         )
         approve_note(visit_id, self._note(), doctor_id="user-a")
         assert temp_db.get_visit(visit_id, doctor_id="user-a")["status"] == "approved"
+
+
+class TestPromptCodeRequirement:
+    """Kod wolno pominąć tylko tam, gdzie aplikacja sama go dobierze z rejestru.
+
+    Regresja, którą to zamyka: prompt mówił „zostaw kod pusty, rejestr go ustali",
+    a po wyłączeniu odpytywania dla ICD-10 nie było już kto miał go uzupełnić —
+    notatki wracały z nazwami rozpoznań, ale bez kodów.
+    """
+
+    def test_icd10_code_is_demanded(self):
+        prompt = build_user_prompt([], klasyfikacje=["ICD-10"], lookup_systems=["ICD-11"])
+        assert "ICD-10 pole `code` jest **OBOWIĄZKOWE**" in prompt
+        assert "możesz zostawić PUSTE" not in prompt
+
+    def test_icd11_code_may_be_left_empty(self):
+        prompt = build_user_prompt([], klasyfikacje=["ICD-11"], lookup_systems=["ICD-11"])
+        assert "możesz zostawić PUSTE" in prompt
+        assert "OBOWIĄZKOWE" not in prompt
+
+    def test_mixed_request_states_both_rules(self):
+        prompt = build_user_prompt(
+            [], klasyfikacje=["ICD-10", "ICD-11"], lookup_systems=["ICD-11"]
+        )
+        assert "ICD-10 pole `code` jest **OBOWIĄZKOWE**" in prompt
+        assert "ICD-11 pole `code` możesz zostawić PUSTE" in prompt
+
+    def test_icd10_may_be_empty_when_lookup_enabled(self):
+        """Po włączeniu VERIFY_ICD10 wraca stara reguła."""
+        prompt = build_user_prompt(
+            [], klasyfikacje=["ICD-10"], lookup_systems=["ICD-11", "ICD-10"]
+        )
+        assert "możesz zostawić PUSTE" in prompt
 
 
 class TestSplitRecommendations:

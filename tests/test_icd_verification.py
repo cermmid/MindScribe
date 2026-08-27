@@ -169,6 +169,13 @@ class TestIcd10Path:
         assert result[0].weryfikacja.value == "NIESPRAWDZANY"
         assert result[0].uwaga == "", "brak sprawdzania nie jest problemem do zgłoszenia"
 
+    def test_missing_code_is_flagged_not_silently_empty(self, fake_who):
+        """Bez odpytywania rejestru pusty kod nikt nie uzupełni — musi być widoczny."""
+        fake_who()
+        result = _verify([ICDCode(klasyfikacja="ICD-10", code="", description="Lęk", confidence=0.9)])
+        assert result[0].weryfikacja.value == "NIEPOTWIERDZONY"
+        assert "nie podał kodu" in result[0].uwaga
+
     def test_lookup_returns_when_flag_enabled(self, fake_who, monkeypatch):
         """Flaga VERIFY_ICD10 przywraca sprawdzanie, gdyby okazało się potrzebne."""
         from src import config

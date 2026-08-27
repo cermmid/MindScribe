@@ -166,13 +166,25 @@ def verify_icd_codes(
             # treningowych obecna od dekad, w przeciwieństwie do ICD-11. Odpytywanie
             # rejestru dawało tu więcej szkody niż pożytku, więc przyjmujemy propozycję
             # wprost. Można to odwrócić ustawiając VERIFY_ICD10.
+            # Skoro rejestru nie pytamy, pusty kod zostanie pusty na zawsze —
+            # taki wpis jest dla specjalisty bezużyteczny, więc musi to być widać.
             results.append(
                 VerifiedICDCode(
                     klasyfikacja=system,
                     code=proposed_code,
                     description=proposed_name,
                     confidence=item.confidence,
-                    weryfikacja=StanWeryfikacji.NIESPRAWDZANY,
+                    weryfikacja=(
+                        StanWeryfikacji.NIESPRAWDZANY
+                        if proposed_code
+                        else StanWeryfikacji.NIEPOTWIERDZONY
+                    ),
+                    uwaga=(
+                        ""
+                        if proposed_code
+                        else f"Model nie podał kodu {system}, a tej klasyfikacji nie dobieramy "
+                        "z rejestru — uzupełnij kod ręcznie."
+                    ),
                 )
             )
             continue

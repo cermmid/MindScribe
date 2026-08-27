@@ -1,3 +1,7 @@
+# Klasyfikacje, dla których aplikacja sama ustala kod w rejestrze WHO. Reszta musi
+# przyjść od modelu z kodem, bo nie ma kto go uzupełnić.
+DEFAULT_LOOKUP_SYSTEMS = ["ICD-11"]
+
 SYSTEM_PROMPT = """Jesteś doświadczonym asystentem klinicznym wspomagającym specjalistę zdrowia psychicznego
 (psychiatrę, psychologa lub psychoterapeutę).
 Twoje zadanie: na podstawie nagrania (lub transkrypcji) wizyty psychiatrycznej w języku polskim
@@ -52,6 +56,7 @@ def build_user_prompt(
     few_shot_examples: list[dict],
     transcript: str | None = None,
     klasyfikacje: list[str] | str = "ICD-10",
+    lookup_systems: list[str] | None = None,
 ) -> str:
     """Build the text prompt. If `transcript` is given, append it; otherwise rely on attached audio."""
     if isinstance(klasyfikacje, str):
@@ -75,17 +80,28 @@ def build_user_prompt(
     rule.append(
         "Najważniejsza jest **nazwa rozpoznania** (`description`) — wypełnij ją zawsze i precyzyjnie."
     )
-    rule.append(
-        "Pole `code` wypełnij TYLKO jeśli jesteś pewien kodu. Przy jakichkolwiek wątpliwościach "
-        "zostaw je PUSTE — dla ICD-10 i ICD-11 kod zostanie ustalony automatycznie w oficjalnym "
-        "rejestrze WHO na podstawie nazwy, a każdy podany kod i tak jest tam sprawdzany. "
-        "Zgadywanie niczego nie daje, a wprowadza w błąd."
-    )
+
+    # Kod wolno pominąć TYLKO tam, gdzie aplikacja sama go ustali z rejestru.
+    # Dla pozostałych klasyfikacji pusty kod oznacza wpis bezużyteczny dla lekarza.
+    checked = [k for k in wanted if k in (lookup_systems or DEFAULT_LOOKUP_SYSTEMS)]
+    unchecked = [k for k in wanted if k not in checked]
+
+    if unchecked:
+        rule.append(
+            f"Dla {', '.join(unchecked)} pole `code` jest **OBOWIĄZKOWE** — podaj konkretny kod "
+            "przy każdym rozpoznaniu. Nikt go za Ciebie nie uzupełni, więc wpis bez kodu jest "
+            "dla specjalisty bezużyteczny."
+        )
+    if checked:
+        rule.append(
+            f"Dla {', '.join(checked)} pole `code` możesz zostawić PUSTE, jeśli nie masz pewności — "
+            "kod zostanie ustalony w oficjalnym rejestrze WHO na podstawie nazwy, a każdy podany "
+            "kod i tak jest tam sprawdzany. Tutaj zgadywanie nic nie daje."
+        )
     if "DSM-5" in wanted:
         rule.append(
-            "Dla DSM-5 podawaj przede wszystkim **pełną nazwę rozpoznania wg DSM-5**. "
-            "DSM-5 nie ma publicznego rejestru, więc tych wpisów nie da się potwierdzić "
-            "automatycznie — tym bardziej nie zgaduj kodów."
+            "Przy DSM-5 podaj **pełną nazwę rozpoznania wg DSM-5** wraz z kodem, którego DSM-5 "
+            "używa (są to kody ICD-10-CM)."
         )
     parts.append("\n".join(rule) + "\n")
 

@@ -11,10 +11,11 @@ from .config import (
     GEMINI_API_KEY,
     GEMINI_MODEL,
     USE_VERTEX_AI,
+    VERIFY_ICD10,
     _gcp_credentials_info,
 )
 from .pricing import estimate_usage_and_cost
-from .prompts import SYSTEM_PROMPT, build_user_prompt
+from .prompts import DEFAULT_LOOKUP_SYSTEMS, SYSTEM_PROMPT, build_user_prompt
 from .schemas import PsychiatricNoteDraft
 
 
@@ -74,6 +75,11 @@ def _client() -> genai.Client:
 THINKING_BUDGET = 256
 
 
+def _lookup_systems() -> list[str]:
+    """Klasyfikacje, dla których sami ustalimy kod — model może je zostawić puste."""
+    return [*DEFAULT_LOOKUP_SYSTEMS, "ICD-10"] if VERIFY_ICD10 else list(DEFAULT_LOOKUP_SYSTEMS)
+
+
 def _generation_config() -> types.GenerateContentConfig:
     return types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
@@ -109,7 +115,12 @@ def generate_note_from_audio(
         data=audio_path.read_bytes(),
         mime_type=mime,
     )
-    prompt = build_user_prompt(few_shot_examples, transcript=None, klasyfikacje=klasyfikacje)
+    prompt = build_user_prompt(
+        few_shot_examples,
+        transcript=None,
+        klasyfikacje=klasyfikacje,
+        lookup_systems=_lookup_systems(),
+    )
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -128,7 +139,12 @@ def generate_note_from_text(
 ) -> tuple[PsychiatricNoteDraft, str, dict]:
     """Reserved for the future Whisper → text → Gemini pipeline."""
     client = _client()
-    prompt = build_user_prompt(few_shot_examples, transcript=transcript, klasyfikacje=klasyfikacje)
+    prompt = build_user_prompt(
+        few_shot_examples,
+        transcript=transcript,
+        klasyfikacje=klasyfikacje,
+        lookup_systems=_lookup_systems(),
+    )
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[prompt],

@@ -32,10 +32,9 @@ class ICDCode(BaseModel):
     code: str = Field(
         default="",
         description=(
-            "Kod rozpoznania, jeśli jesteś go PEWIEN (np. F41.1 dla ICD-10). "
-            "Jeśli nie masz pewności co do kodu, zostaw to pole PUSTE i wypełnij samo "
-            "`description` — kod zostanie ustalony automatycznie w oficjalnym rejestrze WHO. "
-            "Zgadnięty kod jest gorszy niż jego brak."
+            "Kod rozpoznania, np. F41.1 dla ICD-10 albo 6B00 dla ICD-11. "
+            "Czy wolno zostawić puste, mówi polecenie — zależy to od klasyfikacji: "
+            "dla części z nich aplikacja ustala kod sama, dla pozostałych musi przyjść od Ciebie."
         ),
     )
     description: str = Field(
