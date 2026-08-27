@@ -9,7 +9,7 @@ Zatwierdzone notatki są doklejane do kolejnych promptów jako **few-shot exampl
 - **UI + backend**: Python 3.11+, Streamlit (multi-page)
 - **AI**: Gemini 2.5 Flash przez `google-genai` SDK, Structured Outputs (Pydantic → `response_schema`)
 - **Audio**: przesyłane inline i analizowane multimodalnie (transkrypcja + notatka w jednym wywołaniu). Files API odpada — nie istnieje w Vertex AI
-- **Rozpoznania**: ICD-10 i ICD-11 potwierdzane w oficjalnym rejestrze WHO; DSM-5 obsługiwany, ale bez automatycznego potwierdzenia
+- **Rozpoznania**: ICD-11 potwierdzane w oficjalnym rejestrze WHO; ICD-10 i DSM-5 przyjmowane bez odpytywania (patrz niżej)
 - **Baza**: PostgreSQL przez SQLAlchemy (lokalnie SQLite bez konfiguracji)
 - **Logowanie**: Auth0 przez natywne `st.login()`
 
@@ -26,10 +26,7 @@ cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 streamlit run app.py
 ```
 
-Aplikacja otworzy się w przeglądarce. Po zalogowaniu w panelu po lewej dwie strony:
-
-1. **Nowa wizyta** — nagraj albo wgraj audio, kliknij **Wygeneruj notatkę**, popraw pola, **Zatwierdź**.
-2. **Historia wizyt** — przegląd Twoich zapisanych wizyt.
+Aplikacja otworzy się w przeglądarce. Po zalogowaniu w panelu po lewej trzy pozycje: **Strona główna**, **Nowa wizyta** i **Historia wizyt**.
 
 Panel właściciela (koszty, statystyki) to osobna aplikacja: `streamlit run admin/app.py`.
 
@@ -37,10 +34,11 @@ Panel właściciela (koszty, statystyki) to osobna aplikacja: `streamlit run adm
 
 ```
 MindScribe/
-├── app.py                    # Streamlit entry
-├── pages/
-│   ├── 1_Nowa_wizyta.py      # upload audio → generacja → HITL → zapis
-│   └── 2_Historia_wizyt.py   # lista + diff
+├── app.py                    # router: logowanie, init bazy, nawigacja
+├── views/
+│   ├── home.py               # strona główna
+│   ├── new_visit.py          # nagranie → generacja → korekta → zapis
+│   └── history.py            # własne wizyty
 ├── src/
 │   ├── config.py             # .env + stałe
 │   ├── schemas.py            # PsychiatricNote (Pydantic, response_schema dla Gemini)
@@ -52,13 +50,13 @@ MindScribe/
 │   ├── audio.py              # zapis uploadu, typ MIME, wykrywanie ciszy
 │   └── gemini_client.py      # generate_note_from_audio() — audio inline + Structured Output
 ├── admin/app.py              # panel właściciela (osobne hasło)
-├── tests/                    # 113 testów; db też na Postgresie przez TEST_DATABASE_URL
+├── tests/                    # 115 testów; db też na Postgresie przez TEST_DATABASE_URL
 └── data/                     # lokalny SQLite i nagrania (gitignored)
 ```
 
-## Deploy: link "kliknij i działa" dla lekarza (Streamlit Community Cloud)
+## Deploy (Streamlit Community Cloud)
 
-Cel: wysyłasz lekarzowi *"hej, kliknij w ten link"* i wpisuje hasło — nic nie instaluje. Darmowe, jeśli repo jest publiczne.
+Cel: wysyłasz link, a odbiorca zakłada konto i korzysta — nic nie instaluje. Darmowe, jeśli repo jest publiczne.
 
 ### Setup jednorazowy (~5 min)
 
@@ -150,7 +148,17 @@ Warto o nich wiedzieć, bo żadna nie rzuca błędu:
 
 **Model językowy nie może być źródłem kodów rozpoznań.** W testach podał kody ICD-11, które *istnieją*, ale znaczą co innego niż twierdził — np. `QE80` („ofiara przestępstwa lub terroryzmu") opisane jako zaburzenia snu, czy `6A70` (pojedynczy epizod depresyjny) podane jako lęk uogólniony. Walidacja formatu tego nie wykryje, bo kody są prawdziwe. ICD-11 obowiązuje dopiero od 2022 i jest w danych treningowych nieporównanie słabiej reprezentowana niż ICD-10, więc mapowanie kod ↔ znaczenie jest u modelu niepewne.
 
-Dlatego kody przechodzą przez oficjalne API WHO:
+**ICD-10 to jednak inna historia.** Ta klasyfikacja jest w danych treningowych od dekad i model radzi sobie z nią dobrze — w praktyce odpytywanie rejestru dawało tu fałszywe „nie znaleziono" zamiast pomagać. Dlatego **ICD-10 przyjmujemy od modelu bez sprawdzania** (`VERIFY_ICD10=true` przywraca), a rejestr odpytujemy dla **ICD-11**, gdzie model demonstracyjnie się myli.
+
+Wpisy mają trzy stany, nie dwa — „nie sprawdzano" to co innego niż „sprawdzono i nie ma":
+
+| Stan | Znaczenie | Oznaczenie |
+|---|---|---|
+| `POTWIERDZONY` | zgodny z rejestrem WHO | ✅ |
+| `NIESPRAWDZANY` | ICD-10 i DSM-5 — rejestru nie pytaliśmy | • |
+| `NIEPOTWIERDZONY` | pytaliśmy i nie znaleziono | ❓ + ostrzeżenie |
+
+Dla ICD-11 kody przechodzą przez oficjalne API WHO:
 
 1. model podaje przede wszystkim **nazwę rozpoznania**, a kod tylko gdy jest go pewien,
 2. aplikacja potwierdza kod w rejestrze i **zastępuje opis oficjalnym tytułem WHO**, więc para kod–opis nie może się rozjechać,

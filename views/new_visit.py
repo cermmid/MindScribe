@@ -3,12 +3,14 @@ import streamlit as st
 
 from src.audio import looks_silent
 from src.db import DatabaseUnavailable
-from src.auth import current_doctor, current_user_id, require_login
+from src.auth import current_doctor, current_user_id
 from src.formatting import (
     audio_quality_label,
     audio_unusable,
     get_icd_codes,
+    needs_manual_check,
     note_to_text,
+    verification_state,
 )
 from src.services import (
     DEFAULT_AUDIO_SUFFIX,
@@ -22,8 +24,6 @@ from src.services import (
 )
 from src.ui import copy_button, render_note
 
-st.set_page_config(page_title="Nowa wizyta — MindScribe", page_icon="🎙️", layout="wide")
-require_login()
 st.title("🎙️ Nowa wizyta")
 
 # --- 1. Dane wizyty ------------------------------------------------------------
@@ -54,7 +54,7 @@ if "DSM-5" in klasyfikacje:
     st.caption(
         "ℹ️ DSM-5 wydaje Amerykańskie Towarzystwo Psychiatryczne i **nie ma publicznego "
         "rejestru**, więc jego rozpoznań nie potwierdzamy automatycznie — zostaną oznaczone "
-        "do weryfikacji. ICD-10 i ICD-11 sprawdzamy w rejestrze WHO."
+        "do weryfikacji. W rejestrze WHO sprawdzamy ICD-11."
     )
 
 # --- 2. Wejście audio ----------------------------------------------------------
@@ -208,7 +208,7 @@ if "current_note" in st.session_state:
 
     st.markdown(f"**Proponowane rozpoznania — {' + '.join(klasyfikacje)}**")
     _codes = get_icd_codes(note_data)
-    _unverified = [k for k in _codes if not k.get("zweryfikowany")]
+    _unverified = [k for k in _codes if needs_manual_check(k)]
     if _unverified:
         st.warning(
             f"⚠️ {len(_unverified)} z {len(_codes)} rozpoznań **nie zostało potwierdzonych "
@@ -226,7 +226,7 @@ if "current_note" in st.session_state:
                 "code": k.get("code", ""),
                 "description": k.get("description", ""),
                 "confidence": k.get("confidence", 0.0),
-                "zweryfikowany": bool(k.get("zweryfikowany")),
+                "weryfikacja": verification_state(k),
             }
             for k in _codes
         ]
@@ -236,7 +236,7 @@ if "current_note" in st.session_state:
                 "code": "",
                 "description": "",
                 "confidence": 0.0,
-                "zweryfikowany": False,
+                "weryfikacja": "NIESPRAWDZANY",
             }
         ]
     )
@@ -255,9 +255,12 @@ if "current_note" in st.session_state:
             "confidence": st.column_config.NumberColumn(
                 "Pewność", min_value=0.0, max_value=1.0, step=0.05, format="%.2f"
             ),
-            "zweryfikowany": st.column_config.CheckboxColumn(
-                "Potwierdzony",
-                help="Potwierdzony w rejestrze WHO. Ustawiane automatycznie; DSM-5 nigdy.",
+            "weryfikacja": st.column_config.TextColumn(
+                "Rejestr WHO",
+                help=(
+                    "POTWIERDZONY — sprawdzony w rejestrze. NIESPRAWDZANY — ICD-10 i DSM-5 "
+                    "przyjmujemy bez odpytywania. NIEPOTWIERDZONY — sprawdzaliśmy i nie ma."
+                ),
                 disabled=True,
             ),
         },

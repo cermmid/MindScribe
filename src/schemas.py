@@ -46,6 +46,14 @@ class ICDCode(BaseModel):
     )
 
 
+class StanWeryfikacji(str, Enum):
+    """Trzy stany, nie dwa — „nie sprawdzano" to co innego niż „sprawdzono i nie ma"."""
+
+    POTWIERDZONY = "POTWIERDZONY"
+    NIESPRAWDZANY = "NIESPRAWDZANY"
+    NIEPOTWIERDZONY = "NIEPOTWIERDZONY"
+
+
 class VerifiedICDCode(BaseModel):
     """Rozpoznanie po sprawdzeniu w rejestrze WHO.
 
@@ -58,6 +66,8 @@ class VerifiedICDCode(BaseModel):
     code: str = ""
     description: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    weryfikacja: StanWeryfikacji = StanWeryfikacji.NIESPRAWDZANY
+    # Zachowane dla notatek zapisanych przed wprowadzeniem trzech stanów.
     zweryfikowany: bool = False
     propozycja_ai: str = Field(
         default="", description="Pierwotna nazwa od modelu, gdy różni się od oficjalnej."

@@ -1,7 +1,6 @@
 """Testy reguł biznesowych wydzielonych ze stron Streamlita (faza A planu).
 
-Chronią zachowanie, które wcześniej istniało wyłącznie w ciele `pages/1_Nowa_wizyta.py`
-i `pages/2_Historia_wizyt.py`, i które łatwo zgubić przy przepisywaniu na FastAPI.
+Chronią zachowanie, które wcześniej istniało wyłącznie w ciele stron Streamlita (dziś `views/`), i które łatwo zgubić przy przepisywaniu na FastAPI.
 """
 
 import io

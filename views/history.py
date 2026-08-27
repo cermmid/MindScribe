@@ -2,14 +2,12 @@ import json
 
 import streamlit as st
 
-from src.auth import current_user_id, require_login
+from src.auth import current_user_id
 from src.db import DatabaseUnavailable, get_visit, list_visits
 from src.formatting import display_name, humanize_visits_df, note_to_text
 from src.services import resolve_note_version
 from src.ui import copy_button, render_note
 
-st.set_page_config(page_title="Historia wizyt — MindScribe", page_icon="📚", layout="wide")
-require_login()
 st.title("📚 Historia wizyt")
 
 try:

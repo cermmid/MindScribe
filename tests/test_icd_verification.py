@@ -144,22 +144,52 @@ class TestUnverifiable:
 
 
 class TestIcd10Path:
-    def test_uses_code_lookup_for_icd10(self, fake_who):
+    """ICD-10 domyślnie przyjmujemy od modelu, bez odpytywania rejestru.
+
+    Powód jest empiryczny: ICD-10 jest w danych treningowych od dekad i model radzi
+    sobie z nią dobrze, a odpytywanie rejestru dawało tu fałszywe „nie znaleziono".
+    ICD-11 to inna historia — tam model realnie się myli i sprawdzanie zostaje.
+    """
+
+    def test_accepts_model_code_without_asking_registry(self, fake_who):
+        counters = fake_who(codes={"F41.1": "Generalized anxiety disorder"})
+
+        result = _verify(
+            [ICDCode(klasyfikacja="ICD-10", code="F41.1", description="Lęk uogólniony", confidence=0.9)],
+            klasyfikacja="ICD-10",
+        )
+        assert counters["lookup"] == 0, "ICD-10 nie powinno odpytywać rejestru"
+        assert result[0].code == "F41.1"
+        assert result[0].description == "Lęk uogólniony"
+
+    def test_marked_as_not_checked_not_as_missing(self, fake_who):
+        """Kluczowe rozróżnienie: „nie sprawdzano" to nie to samo co „nie ma"."""
+        fake_who()
+        result = _verify([ICDCode(klasyfikacja="ICD-10", code="F41.1", description="Lęk", confidence=0.9)])
+        assert result[0].weryfikacja.value == "NIESPRAWDZANY"
+        assert result[0].uwaga == "", "brak sprawdzania nie jest problemem do zgłoszenia"
+
+    def test_lookup_returns_when_flag_enabled(self, fake_who, monkeypatch):
+        """Flaga VERIFY_ICD10 przywraca sprawdzanie, gdyby okazało się potrzebne."""
+        from src import config
+
+        monkeypatch.setattr(config, "VERIFY_ICD10", True)
         fake_who(codes={"F41.1": "Generalized anxiety disorder"})
 
         result = _verify(
             [ICDCode(klasyfikacja="ICD-10", code="F41.1", description="Lęk uogólniony", confidence=0.9)],
             klasyfikacja="ICD-10",
         )
-        assert result[0].zweryfikowany is True
+        assert result[0].weryfikacja.value == "POTWIERDZONY"
         assert result[0].description == "Generalized anxiety disorder"
 
 
 class TestMultipleClassifications:
     """Notatka może zawierać kilka systemów naraz — każdy wpis idzie własną ścieżką."""
 
-    def test_each_entry_verified_against_its_own_system(self, fake_who):
-        fake_who(codes={"6B00": "Generalised anxiety disorder", "F41.1": "Generalized anxiety disorder"})
+    def test_each_entry_follows_rules_of_its_own_system(self, fake_who):
+        """ICD-11 idzie do rejestru, ICD-10 nie — każdy wpis własną ścieżką."""
+        fake_who(codes={"6B00": "Generalised anxiety disorder"})
 
         result = _verify(
             [
@@ -168,7 +198,8 @@ class TestMultipleClassifications:
             ]
         )
         assert [r.klasyfikacja for r in result] == ["ICD-11", "ICD-10"]
-        assert all(r.zweryfikowany for r in result)
+        assert result[0].weryfikacja.value == "POTWIERDZONY"
+        assert result[1].weryfikacja.value == "NIESPRAWDZANY"
 
     def test_dict_without_system_falls_back_to_requested(self, fake_who):
         """Wpisy ze starszych notatek nie mają klasyfikacji — bierzemy zamówioną."""

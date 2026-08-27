@@ -1,7 +1,7 @@
 """Warstwa serwisowa — logika przypadków użycia, bez żadnej zależności od UI.
 
 Ten moduł celowo **nie importuje streamlita ani pandas**. Cała logika, która wcześniej
-mieszkała w ciele stron `pages/`, jest tutaj, żeby dało się ją wywołać tak samo z
+mieszkała w ciele stron widoków, jest tutaj, żeby dało się ją wywołać tak samo z
 Streamlita, jak i z backendu FastAPI (patrz plan iteracji 4, faza A).
 
 Reguły biznesowe zakodowane w tym pliku:
@@ -23,6 +23,7 @@ from .schemas import (
     Klasyfikacja,
     PsychiatricNote,
     RyzykoSamobojcze,
+    StanWeryfikacji,
     VerifiedICDCode,
 )
 
@@ -136,6 +137,7 @@ def verify_icd_codes(
     z czytelną uwagą, a lekarz decyduje.
     """
     from . import icd
+    from .config import VERIFY_ICD10
 
     fallback = _normalize_klasyfikacja(klasyfikacja)
     results: list[VerifiedICDCode] = []
@@ -157,6 +159,22 @@ def verify_icd_codes(
 
         if system == "DSM-5":
             results.append(_verify_dsm5(item, system, api_down_note))
+            continue
+
+        if system == "ICD-10" and not VERIFY_ICD10:
+            # Model radzi sobie z ICD-10 dobrze — ta klasyfikacja jest w danych
+            # treningowych obecna od dekad, w przeciwieństwie do ICD-11. Odpytywanie
+            # rejestru dawało tu więcej szkody niż pożytku, więc przyjmujemy propozycję
+            # wprost. Można to odwrócić ustawiając VERIFY_ICD10.
+            results.append(
+                VerifiedICDCode(
+                    klasyfikacja=system,
+                    code=proposed_code,
+                    description=proposed_name,
+                    confidence=item.confidence,
+                    weryfikacja=StanWeryfikacji.NIESPRAWDZANY,
+                )
+            )
             continue
 
         if api_down_note:
@@ -187,6 +205,7 @@ def verify_icd_codes(
                     code=match.code,
                     description=match.title,
                     confidence=item.confidence,
+                    weryfikacja=StanWeryfikacji.POTWIERDZONY,
                     zweryfikowany=True,
                     propozycja_ai=proposed_name if note else "",
                     uwaga=note,
@@ -205,6 +224,7 @@ def verify_icd_codes(
                     code=searched.code,
                     description=searched.title,
                     confidence=item.confidence,
+                    weryfikacja=StanWeryfikacji.POTWIERDZONY,
                     zweryfikowany=True,
                     propozycja_ai=proposed_name,
                     uwaga=note,
@@ -241,11 +261,17 @@ def _verify_dsm5(item: ICDCode, system: str, api_down_note: str) -> VerifiedICDC
             crosscheck = None
         if crosscheck is not None:
             note = f"{DSM5_NOTE} Kontrolnie: {code} w ICD-10 to „{crosscheck.title}”."
-    return _unverified(item, note, system)
+    return _unverified(item, note, system, StanWeryfikacji.NIESPRAWDZANY)
 
 
-def _unverified(item: ICDCode, note: str, system: str = "") -> VerifiedICDCode:
+def _unverified(
+    item: ICDCode,
+    note: str,
+    system: str = "",
+    stan: StanWeryfikacji = StanWeryfikacji.NIEPOTWIERDZONY,
+) -> VerifiedICDCode:
     return VerifiedICDCode(
+        weryfikacja=stan,
         klasyfikacja=system or _normalize_klasyfikacja(getattr(item, "klasyfikacja", None)),
         code=(item.code or "").strip(),
         description=(item.description or "").strip(),

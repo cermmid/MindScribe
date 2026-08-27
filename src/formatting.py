@@ -71,6 +71,23 @@ def group_codes_by_classification(note: dict[str, Any]) -> dict[str, list[dict[s
     return ordered
 
 
+def verification_state(code: dict[str, Any]) -> str:
+    """Stan weryfikacji wpisu, tolerancyjnie wobec notatek sprzed trzech stanów.
+
+    Starsze wpisy mają tylko `zweryfikowany` — `True` mapujemy na potwierdzony,
+    `False` na niepotwierdzony, bo wtedy brak potwierdzenia zawsze znaczył próbę.
+    """
+    state = str(code.get("weryfikacja") or "").upper()
+    if state in {"POTWIERDZONY", "NIESPRAWDZANY", "NIEPOTWIERDZONY"}:
+        return state
+    return "POTWIERDZONY" if code.get("zweryfikowany") else "NIEPOTWIERDZONY"
+
+
+def needs_manual_check(code: dict[str, Any]) -> bool:
+    """Czy wpis wymaga uwagi lekarza — czyli próbowaliśmy i się nie udało."""
+    return verification_state(code) == "NIEPOTWIERDZONY"
+
+
 def audio_unusable(note: dict[str, Any]) -> bool:
     """Czy model zgłosił, że w nagraniu nie było zrozumiałej mowy."""
     return str(note.get("jakosc_nagrania", "")).upper() == "BRAK_MOWY"
@@ -157,7 +174,7 @@ def note_to_text(
                 if desc:
                     line += f" — {desc}"
                 # Oznaczenie trafia też tutaj, bo ten tekst lekarz wkleja do dokumentacji.
-                if not k.get("zweryfikowany"):
+                if needs_manual_check(k):
                     line += " [DO WERYFIKACJI]"
                     any_unverified = True
                 lines.append(line)

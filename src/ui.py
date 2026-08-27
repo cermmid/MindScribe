@@ -10,7 +10,9 @@ from .formatting import (
     audio_quality_label,
     audio_unusable,
     group_codes_by_classification,
+    needs_manual_check,
     risk_is_present,
+    verification_state,
     visit_type_label,
 )
 
@@ -49,7 +51,7 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
 
     if grouped := group_codes_by_classification(note):
         all_codes = [k for kody in grouped.values() for k in kody]
-        unverified = [k for k in all_codes if not k.get("zweryfikowany")]
+        unverified = [k for k in all_codes if needs_manual_check(k)]
         if unverified:
             st.warning(
                 f"⚠️ {len(unverified)} z {len(all_codes)} rozpoznań **nie zostało potwierdzonych "
@@ -58,7 +60,9 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
         for system, kody in grouped.items():
             st.markdown(f"#### Rozpoznania ({system})")
             for k in kody:
-                mark = "✅" if k.get("zweryfikowany") else "❓"
+                mark = {"POTWIERDZONY": "✅", "NIEPOTWIERDZONY": "❓"}.get(
+                    verification_state(k), "•"
+                )
                 code = k.get("code") or "—"
                 conf = k.get("confidence")
                 suffix = f" _(pewność rozpoznania {float(conf):.2f})_" if conf is not None else ""
