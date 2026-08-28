@@ -324,6 +324,52 @@ class TestDsm5:
         assert result[0].uwaga == services.DSM5_NOTE
 
 
+class TestEditorRoundTrip:
+    """Wiersze wracające z edytora muszą dać się zweryfikować tak samo jak propozycje modelu."""
+
+    def test_english_term_survives_the_editor(self, fake_who):
+        fake_who(terms={"generalised anxiety disorder": ("6B00", "Generalised anxiety disorder")})
+        rows = [
+            {
+                "klasyfikacja": "ICD-11",
+                "code": "",
+                "description": "Zaburzenie lękowe uogólnione",
+                "termin_wyszukiwania": "Generalised anxiety disorder",
+                "confidence": 0.8,
+                # Kolumny tylko do odczytu też wracają z edytora — mają być zignorowane.
+                "weryfikacja": "NIEPOTWIERDZONY",
+                "uwaga": "cokolwiek",
+            }
+        ]
+        result = services.verify_icd_codes(
+            services.clean_icd_rows(rows, default_klasyfikacja="ICD-11"),
+            klasyfikacja="ICD-11",
+        )
+        assert result[0].code == "6B00"
+        assert result[0].weryfikacja is services.StanWeryfikacji.POTWIERDZONY
+        # Lekarz czyta po polsku; angielskie brzmienie idzie obok.
+        assert result[0].description == "Zaburzenie lękowe uogólnione"
+        assert result[0].oficjalna_nazwa == "Generalised anxiety disorder"
+
+    def test_polish_name_alone_finds_nothing(self, fake_who):
+        """Dowód, po co ta kolumna: rejestr WHO nie zna polskich nazw."""
+        fake_who(terms={"generalised anxiety disorder": ("6B00", "Generalised anxiety disorder")})
+        rows = [
+            {
+                "klasyfikacja": "ICD-11",
+                "code": "",
+                "description": "Zaburzenie lękowe uogólnione",
+                "confidence": 0.8,
+            }
+        ]
+        result = services.verify_icd_codes(
+            services.clean_icd_rows(rows, default_klasyfikacja="ICD-11"),
+            klasyfikacja="ICD-11",
+        )
+        assert result[0].code == ""
+        assert result[0].weryfikacja is services.StanWeryfikacji.NIEPOTWIERDZONY
+
+
 class TestTitleCleaning:
     def test_strips_search_highlight_markup(self):
         assert icd._clean("<em class='found'>Anxiety</em> disorder") == "Anxiety disorder"

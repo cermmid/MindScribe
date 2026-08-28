@@ -20,6 +20,7 @@ from src.services import (
     create_visit_from_audio,
     derive_audio_suffix,
     load_few_shot_examples,
+    registry_is_configured,
     split_lines,
 )
 from src.ui import copy_button, render_note
@@ -214,9 +215,14 @@ if "current_note" in st.session_state:
             f"⚠️ {len(_unverified)} z {len(_codes)} rozpoznań **nie zostało potwierdzonych "
             "w oficjalnym rejestrze** — sprawdź je ręcznie."
         )
-    for k in _codes:
-        if uwaga := (k.get("uwaga") or "").strip():
-            st.caption(f"• {k.get('klasyfikacja') or '?'} {k.get('code') or '—'}: {uwaga}")
+    # Bez poświadczeń rejestr nie odpowie na nic, więc ICD-11 wraca bez kodu. To nie
+    # jest wtedy błąd rozpoznania, tylko brak konfiguracji — i musi być tak nazwane.
+    if "ICD-11" in klasyfikacje and not registry_is_configured():
+        st.error(
+            "🔌 **Rejestr WHO nie jest skonfigurowany** — brak `ICD_CLIENT_ID` "
+            "i `ICD_CLIENT_SECRET` w sekretach aplikacji. Kody ICD-11 nie zostaną "
+            "dobrane ani sprawdzone; uzupełnij je ręcznie w tabeli poniżej."
+        )
 
     _default_system = klasyfikacje[0]
     icd_df = pd.DataFrame(
@@ -225,8 +231,12 @@ if "current_note" in st.session_state:
                 "klasyfikacja": k.get("klasyfikacja") or _default_system,
                 "code": k.get("code", ""),
                 "description": k.get("description", ""),
+                # Termin angielski jedzie przez edytor, bo to nim odpytujemy rejestr
+                # przy zatwierdzaniu. Zgubiony tutaj = brak potwierdzenia ICD-11.
+                "termin_wyszukiwania": k.get("termin_wyszukiwania", ""),
                 "confidence": k.get("confidence", 0.0),
                 "weryfikacja": verification_state(k),
+                "uwaga": (k.get("uwaga") or "").strip(),
             }
             for k in _codes
         ]
@@ -235,8 +245,10 @@ if "current_note" in st.session_state:
                 "klasyfikacja": _default_system,
                 "code": "",
                 "description": "",
+                "termin_wyszukiwania": "",
                 "confidence": 0.0,
                 "weryfikacja": "NIESPRAWDZANY",
+                "uwaga": "",
             }
         ]
     )
@@ -249,9 +261,21 @@ if "current_note" in st.session_state:
                 "System", options=["ICD-10", "ICD-11", "DSM-5"], required=True
             ),
             "code": st.column_config.TextColumn(
-                "Kod", help="Zostaw puste, żeby kod dobrał się automatycznie z nazwy rozpoznania."
+                "Kod",
+                help=(
+                    "Kod rozpoznania. Przy ICD-11 aplikacja próbuje go potwierdzić w rejestrze "
+                    "WHO, ale gdy rejestr nie odpowie, zostaje to, co jest tutaj — pustego "
+                    "pola nikt nie uzupełni."
+                ),
             ),
             "description": st.column_config.TextColumn("Rozpoznanie", required=True),
+            "termin_wyszukiwania": st.column_config.TextColumn(
+                "Termin ang. (rejestr WHO)",
+                help=(
+                    "Nazwa rozpoznania po angielsku — tym szukamy w rejestrze WHO, bo polskich "
+                    "nazw nie zna. Popraw ją, jeśli kod ICD-11 nie chce się potwierdzić."
+                ),
+            ),
             "confidence": st.column_config.NumberColumn(
                 "Pewność", min_value=0.0, max_value=1.0, step=0.05, format="%.2f"
             ),
@@ -262,6 +286,12 @@ if "current_note" in st.session_state:
                     "przyjmujemy bez odpytywania. NIEPOTWIERDZONY — sprawdzaliśmy i nie ma."
                 ),
                 disabled=True,
+            ),
+            "uwaga": st.column_config.TextColumn(
+                "Dlaczego",
+                help="Co dokładnie powiedział rejestr WHO o tym wpisie.",
+                disabled=True,
+                width="large",
             ),
         },
         key="icd_editor",

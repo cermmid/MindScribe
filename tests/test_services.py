@@ -121,6 +121,22 @@ class TestCleanIcdRows:
     def test_missing_description_becomes_empty_string(self):
         assert clean_icd_rows([{"code": "F41.1", "confidence": 0.5}])[0].description == ""
 
+    def test_keeps_english_search_term(self):
+        """Bez tego zatwierdzenie odpytywało rejestr WHO polską nazwą i gubiło ICD-11."""
+        row = {
+            "klasyfikacja": "ICD-11",
+            "code": "",
+            "description": "Zaburzenie lękowe uogólnione",
+            "termin_wyszukiwania": "Generalised anxiety disorder",
+            "confidence": 0.8,
+        }
+        assert clean_icd_rows(row for row in [row])[0].termin_wyszukiwania == (
+            "Generalised anxiety disorder"
+        )
+
+    def test_missing_search_term_is_empty_not_none(self):
+        assert clean_icd_rows([{"code": "F41.1"}])[0].termin_wyszukiwania == ""
+
 
 class TestBuildCorrectedNote:
     def _valid_kwargs(self, **overrides):

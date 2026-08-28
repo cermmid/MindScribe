@@ -67,6 +67,11 @@ def clean_icd_rows(
     Sam pusty kod jest poprawny: rozpoznanie opisane nazwą dostanie kod z rejestru WHO,
     a to bezpieczniejsze niż kod zgadnięty przez model.
 
+    `termin_wyszukiwania` musi przejść przez edytor nietknięty. Gubienie go tutaj
+    znaczyło, że przy zatwierdzaniu rejestr WHO był odpytywany polską nazwą
+    rozpoznania — a polskich nazw nie zna, więc **każde** ICD-11 traciło wtedy
+    potwierdzenie, nawet jeśli chwilę wcześniej je miało.
+
     `confidence` bywa `None` albo `NaN`, stąd podwójne zabezpieczenie.
     """
     cleaned: list[ICDCode] = []
@@ -90,10 +95,22 @@ def clean_icd_rows(
                 ),
                 code=code,
                 description=description,
+                termin_wyszukiwania=str(row.get("termin_wyszukiwania") or "").strip(),
                 confidence=confidence,
             )
         )
     return cleaned
+
+
+def registry_is_configured() -> bool:
+    """Czy w konfiguracji są poświadczenia do rejestru WHO.
+
+    Bez nich każde ICD-11 wraca bez kodu, a powód ginie w drobnym druku pod tabelą —
+    widok musi móc powiedzieć to wprost.
+    """
+    from . import icd
+
+    return icd.is_configured()
 
 
 # --- Weryfikacja rozpoznań w rejestrze WHO -------------------------------------
