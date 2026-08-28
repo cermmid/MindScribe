@@ -26,6 +26,9 @@ BASE_URL = "https://id.who.int/icd"
 
 # Wydania używane do odpytywania. "release/11/mms" bez numeru wskazuje najnowsze wydanie.
 ICD11_LINEARIZATION = "release/11/mms"
+ICD11_RELEASES = "release/11"
+# Wyszukiwarka fundacji — jedyna, która nie zależy od numeru wydania.
+FOUNDATION_SEARCH = "entity/search"
 ICD10_RELEASE = "release/10/2019"
 
 _TIMEOUT = 8
@@ -169,23 +172,30 @@ _release_cache: dict[str, str] = {"id": ""}
 def _release_id() -> str:
     """Numer najnowszego wydania ICD-11 (np. „2025-01"), pusty gdy się nie udało ustalić.
 
-    Adres bez numeru wydania (`release/11/mms`) działa dla części zasobów, ale
-    dokumentacja WHO opisuje wyszukiwarkę pod adresem z numerem. Ustalamy go raz
-    i próbujemy obu wariantów — koszt to jedno zapytanie na uruchomienie procesu.
+    Wyszukiwarka linearyzacji jest u WHO opisana pod adresem **z numerem wydania**.
+    Numer bierzemy z korzenia linearyzacji, a gdy tamten adres zawiedzie — z listy
+    wydań, która zwraca je od najnowszego. Koszt to jedno zapytanie na proces.
     """
     if _release_cache["id"]:
         return _release_cache["id"]
-    try:
-        payload = _get(ICD11_LINEARIZATION, language="en") or {}
-    except IcdUnavailable:
-        return ""
-    release = str(payload.get("releaseId") or "").strip()
-    if not release:
-        uri = str(payload.get("@id") or payload.get("latestRelease") or "")
-        match = _RELEASE_RE.search(uri)
-        release = match.group(1) if match else ""
-    _release_cache["id"] = release
-    return release
+
+    for path in (ICD11_LINEARIZATION, ICD11_RELEASES):
+        try:
+            payload = _get(path, language="en") or {}
+        except IcdUnavailable:
+            continue
+        release = str(payload.get("releaseId") or "").strip()
+        if not release:
+            uri = str(payload.get("@id") or payload.get("latestRelease") or "")
+            if not uri:
+                listed = payload.get("release") or payload.get("releases") or []
+                uri = str(listed[0]) if isinstance(listed, list) and listed else ""
+            found = _RELEASE_RE.search(uri)
+            release = found.group(1) if found else ""
+        if release:
+            _release_cache["id"] = release
+            return release
+    return ""
 
 
 def _mms_prefix() -> str:
@@ -194,10 +204,18 @@ def _mms_prefix() -> str:
 
 
 def _icd11_search_paths() -> list[str]:
-    """Adresy wyszukiwarki od najbardziej do najmniej prawdopodobnego."""
+    """Adresy wyszukiwarki od najbardziej do najmniej prawdopodobnego.
+
+    Ostatnia pozycja to wyszukiwarka fundacji. Nie zwraca kodów — te nadaje dopiero
+    linearyzacja, więc dobieramy je osobno (`_matches_from`) — ale jest jedynym
+    adresem wyszukiwania, który istnieje niezależnie od wydania. Gdy warianty
+    linearyzacji odpowiadają 404, to ona zostaje.
+    """
     paths = [f"{_mms_prefix()}/search"]
-    if paths[0] != f"{ICD11_LINEARIZATION}/search":
-        paths.append(f"{ICD11_LINEARIZATION}/search")
+    unpinned = f"{ICD11_LINEARIZATION}/search"
+    if unpinned not in paths:
+        paths.append(unpinned)
+    paths.append(FOUNDATION_SEARCH)
     return paths
 
 
@@ -256,17 +274,18 @@ def describe_attempts(trace: list[dict]) -> str:
     """
     summary: list[str] = []
     for attempt in trace:
+        if standalone := attempt.get("note"):
+            summary.append(str(standalone))
+            continue
         path = str(attempt.get("path", "?"))
         if error := attempt.get("error"):
             summary.append(f"{path}: {error}")
         elif (status := attempt.get("status")) and int(status) >= 400:
             summary.append(f"{path}: HTTP {status}")
-        elif api_error := attempt.get("error_message") or attempt.get("api_error"):
-            summary.append(f"{path}: {api_error}")
         else:
             summary.append(f"{path}: {attempt.get('entities', 0)} wyników")
     # Ta sama odpowiedź z czterech wariantów to jedna informacja, nie cztery.
-    return "; ".join(list(dict.fromkeys(summary))[:3])
+    return "; ".join(list(dict.fromkeys(summary))[:4])
 
 
 def search(
@@ -295,7 +314,12 @@ def search(
 
     last_error: IcdUnavailable | None = None
     statuses: list[int] = []
+    tried: list[str] = []
     answered = False
+
+    # Bez tego nie wiadomo, czy próbowaliśmy adresu z numerem wydania, czy tylko bez —
+    # a to zupełnie inna diagnoza przy serii odpowiedzi 404.
+    _note(trace, note=f"wydanie ICD-11: {_release_id() or 'nieustalone'}")
 
     for lang in _language_order(language):
         for path in _icd11_search_paths():
@@ -309,6 +333,7 @@ def search(
                     continue
 
                 statuses.append(status)
+                tried.append(f"{path} → HTTP {status}")
                 if status >= 400:
                     # 404 na wyszukiwarce nie znaczy „nie ma takiego rozpoznania" —
                     # znaczy, że pytamy pod złym adresem. Próbujemy następnego wariantu.
@@ -338,10 +363,13 @@ def search(
         if last_error is not None:
             raise last_error
         if statuses:
+            # Wypisujemy adresy, a nie same kody — „404 wszędzie" nie mówi,
+            # czy w ogóle doszło do próby pod adresem z numerem wydania.
             raise IcdUnavailable(
-                "Wyszukiwarka WHO odpowiedziała "
-                + ", ".join(f"HTTP {code}" for code in dict.fromkeys(statuses))
-                + " pod każdym znanym adresem."
+                "Żaden adres wyszukiwarki WHO nie odpowiedział poprawnie "
+                f"(wydanie: {_release_id() or 'nieustalone'}; "
+                + "; ".join(dict.fromkeys(tried))
+                + ")."
             )
     return []
 

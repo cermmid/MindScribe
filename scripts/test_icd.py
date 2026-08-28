@@ -37,6 +37,9 @@ def _dump_trace(trace: list[dict]) -> None:
         return
     print("      ── próby zapytań ──")
     for attempt in trace:
+        if standalone := attempt.get("note"):
+            print(f"      {standalone}")
+            continue
         head = (
             f"      {attempt['path']} [{attempt['language']}, "
             f"flexisearch={attempt['flexisearch']}]"

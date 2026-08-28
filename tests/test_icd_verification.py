@@ -598,6 +598,27 @@ class TestIcd11Search:
         with pytest.raises(icd.IcdUnavailable):
             icd.search("anxiety", language="en")
 
+    def test_foundation_search_rescues_a_404_linearization(self, who_endpoint):
+        """Dokładnie sytuacja z produkcji: warianty linearyzacji zwracają 404."""
+        calls = who_endpoint(
+            {
+                icd.FOUNDATION_SEARCH: {
+                    "destinationEntities": [
+                        {"id": "http://id.who.int/icd/entity/1635750499", "title": "Anxiety"}
+                    ]
+                },
+                # Encja z fundacji nie ma kodu — kod nadaje linearyzacja.
+                f"{icd.ICD11_LINEARIZATION}/1635750499": {
+                    "code": "6B00",
+                    "title": {"@value": "Generalised anxiety disorder"},
+                },
+            }
+        )
+        assert icd.search("generalized anxiety disorder", language="en") == [
+            icd.IcdMatch(code="6B00", title="Generalised anxiety disorder")
+        ]
+        assert any(path == icd.FOUNDATION_SEARCH for path, _ in calls)
+
     def test_wrong_address_is_not_reported_as_a_missing_diagnosis(self, who_endpoint):
         """404 z wyszukiwarki znaczy „zły adres". Wcześniej `_get` mieliło to na pustą listę."""
         who_endpoint({})  # każda ścieżka odpowiada 404
@@ -614,14 +635,20 @@ class TestIcd11Search:
         who_endpoint({icd.ICD11_LINEARIZATION + "/search": {"destinationEntities": []}})
         trace: list[dict] = []
         icd.search("anxiety", language="en", trace=trace)
-        assert icd.describe_attempts(trace) == "release/11/mms/search: 0 wyników"
+        assert icd.describe_attempts(trace) == (
+            "wydanie ICD-11: nieustalone; release/11/mms/search: 0 wyników; "
+            "entity/search: HTTP 404"
+        )
 
     def test_trace_records_every_attempt(self, who_endpoint):
         who_endpoint({icd.ICD11_LINEARIZATION + "/search": {"destinationEntities": []}})
         trace: list[dict] = []
         icd.search("anxiety", language="en", trace=trace)
-        assert trace and all(entry["path"].endswith("/search") for entry in trace)
-        assert {entry["flexisearch"] for entry in trace} == {"false", "true"}
+        queries = [entry for entry in trace if "path" in entry]
+        assert queries and all(entry["path"].endswith("search") for entry in queries)
+        assert {entry["flexisearch"] for entry in queries} == {"false", "true"}
+        # Pierwszy wpis mówi, czy w ogóle udało się ustalić wydanie.
+        assert trace[0]["note"].startswith("wydanie ICD-11:")
 
 
 class TestIcd11CodeLookup:
