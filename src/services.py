@@ -102,6 +102,25 @@ def clean_icd_rows(
     return cleaned
 
 
+CLASSIFICATION_ORDER = ("ICD-10", "ICD-11", "DSM-5")
+
+
+def sort_codes_by_classification(
+    codes: Iterable[VerifiedICDCode],
+) -> list[VerifiedICDCode]:
+    """Ustaw rozpoznania klasyfikacjami: najpierw ICD-10, potem ICD-11, na końcu DSM-5.
+
+    Model zwraca je rozpoznaniami — ten sam obraz kliniczny kolejno w każdej zamówionej
+    klasyfikacji. Dla czytającego to szum: kto chce ogarnąć samo ICD-10, musi przeskakiwać
+    co drugi albo co trzeci wiersz.
+
+    Sortowanie jest stabilne, więc **wewnątrz** klasyfikacji kolejność rozpoznań zostaje
+    dokładnie taka, jaką ustalił model — a to on porządkuje je od głównego do pobocznych.
+    """
+    rank = {name: index for index, name in enumerate(CLASSIFICATION_ORDER)}
+    return sorted(codes, key=lambda code: rank.get(code.klasyfikacja, len(rank)))
+
+
 def registry_is_configured() -> bool:
     """Czy w konfiguracji są poświadczenia do rejestru WHO.
 
@@ -293,7 +312,7 @@ def verify_icd_codes(
                 )
             )
 
-    return results
+    return sort_codes_by_classification(results)
 
 
 def _verify_dsm5(item: ICDCode, system: str, api_down_note: str) -> VerifiedICDCode:

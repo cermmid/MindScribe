@@ -273,9 +273,45 @@ class TestMultipleClassifications:
                 ICDCode(klasyfikacja="ICD-10", code="F41.1", description="Lęk", confidence=0.9),
             ]
         )
-        assert [r.klasyfikacja for r in result] == ["ICD-11", "ICD-10"]
-        assert result[0].weryfikacja.value == "POTWIERDZONY"
-        assert result[1].weryfikacja.value == "NIESPRAWDZANY"
+        # Wynik jest posortowany klasyfikacjami, więc szukamy po systemie, nie po pozycji.
+        by_system = {r.klasyfikacja: r for r in result}
+        assert by_system["ICD-11"].weryfikacja.value == "POTWIERDZONY"
+        assert by_system["ICD-10"].weryfikacja.value == "NIESPRAWDZANY"
+
+    def test_codes_are_grouped_by_classification(self, fake_who):
+        """Model podaje rozpoznaniami; czyta się to klasyfikacjami."""
+        fake_who(codes={"6B00": "Generalised anxiety disorder", "7A00": "Chronic insomnia"})
+        result = _verify(
+            [
+                ICDCode(klasyfikacja="ICD-10", code="F41.1", description="Lęk", confidence=0.9),
+                ICDCode(klasyfikacja="ICD-11", code="6B00", description="Lęk", confidence=0.9),
+                ICDCode(klasyfikacja="DSM-5", code="300.02", description="Lęk", confidence=0.9),
+                ICDCode(klasyfikacja="ICD-10", code="F51.0", description="Bezsenność", confidence=0.6),
+                ICDCode(klasyfikacja="ICD-11", code="7A00", description="Bezsenność", confidence=0.6),
+                ICDCode(klasyfikacja="DSM-5", code="307.42", description="Bezsenność", confidence=0.6),
+            ]
+        )
+        assert [r.klasyfikacja for r in result] == [
+            "ICD-10",
+            "ICD-10",
+            "ICD-11",
+            "ICD-11",
+            "DSM-5",
+            "DSM-5",
+        ]
+
+    def test_order_within_a_classification_is_preserved(self, fake_who):
+        """Model porządkuje rozpoznania od głównego do pobocznych — tego nie mieszamy."""
+        fake_who()
+        result = _verify(
+            [
+                ICDCode(klasyfikacja="DSM-5", code="307.42", description="Bezsenność", confidence=0.6),
+                ICDCode(klasyfikacja="ICD-10", code="F32.1", description="Depresja", confidence=0.8),
+                ICDCode(klasyfikacja="ICD-10", code="F43.2", description="Adaptacyjne", confidence=0.6),
+                ICDCode(klasyfikacja="ICD-10", code="F51.0", description="Bezsenność", confidence=0.5),
+            ]
+        )
+        assert [r.code for r in result] == ["F32.1", "F43.2", "F51.0", "307.42"]
 
     def test_dict_without_system_falls_back_to_requested(self, fake_who):
         """Wpisy ze starszych notatek nie mają klasyfikacji — bierzemy zamówioną."""
