@@ -17,6 +17,24 @@ from src.db import DatabaseUnavailable, init_db
 
 st.set_page_config(page_title="MindScribe", page_icon="🧠", layout="wide")
 
+# Streamlit przygasza całą stronę przy każdym przeładowaniu skryptu, a przeładowanie
+# odpala każde kliknięcie — zaznaczenie klasyfikacji, zmiana pola w tabeli. Miga to
+# bez przerwy i przy dłuższym wypełnianiu notatki męczy wzrok. Wygaszamy przygaszanie;
+# o tym, że coś się liczy, i tak mówi pasek postępu przy generowaniu.
+st.markdown(
+    """
+    <style>
+    [data-stale="true"], .element-container[data-stale="true"],
+    [data-testid="stAppViewContainer"] [data-stale="true"] {
+        opacity: 1 !important;
+        transition: none !important;
+        filter: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 require_login()
 
 try:

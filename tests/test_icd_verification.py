@@ -647,6 +647,44 @@ class TestIcd11CodeLookup:
         assert icd.lookup_code("XX99", icd11=True, language="en") is None
 
 
+class TestRegistryAnswerReachesTheNote:
+    """Sprawdzenie okablowania: to, co odpowiedział rejestr, ma dojść do uwagi na ekranie."""
+
+    def test_empty_answer_is_quoted_in_the_note(self, who_endpoint):
+        who_endpoint({icd.ICD11_LINEARIZATION + "/search": {"destinationEntities": []}})
+        result = services.verify_icd_codes(
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="",
+                    description="Bezsenność przewlekła",
+                    termin_wyszukiwania="Chronic insomnia",
+                    confidence=0.7,
+                )
+            ],
+            klasyfikacja="ICD-11",
+        )
+        assert "Chronic insomnia" in result[0].uwaga
+        assert "0 wyników" in result[0].uwaga
+
+    def test_wrong_address_reads_as_an_outage_not_a_missing_diagnosis(self, who_endpoint):
+        who_endpoint({})  # 404 pod każdym adresem
+        result = services.verify_icd_codes(
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="",
+                    description="Bezsenność przewlekła",
+                    termin_wyszukiwania="Chronic insomnia",
+                    confidence=0.7,
+                )
+            ],
+            klasyfikacja="ICD-11",
+        )
+        assert "404" in result[0].uwaga
+        assert "Nie znaleziono tego rozpoznania" not in result[0].uwaga
+
+
 class TestApiErrorPayload:
     def test_http_200_with_error_flag_is_reported(self):
         assert icd._api_error({"error": True, "errorMessage": "zła fraza"}) == "zła fraza"
