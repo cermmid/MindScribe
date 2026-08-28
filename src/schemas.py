@@ -75,6 +75,10 @@ class VerifiedICDCode(BaseModel):
     klasyfikacja: str = ""
     code: str = ""
     description: str = ""
+    # Angielski termin, którym odpytujemy rejestr. Musi przetrwać weryfikację, inaczej
+    # przy zatwierdzaniu (gdzie sprawdzamy wszystko jeszcze raz) nie mamy już czym
+    # szukać i lecimy polską nazwą, której rejestr WHO nie zna.
+    termin_wyszukiwania: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     # Oficjalny tytuł z rejestru (po angielsku). Trzymamy go OBOK polskiej nazwy,
     # zamiast nią podmieniać: lekarz czyta po polsku, ale rozjazd znaczenia zostaje

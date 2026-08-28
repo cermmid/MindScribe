@@ -351,6 +351,69 @@ class TestEditorRoundTrip:
         assert result[0].description == "Zaburzenie lękowe uogólnione"
         assert result[0].oficjalna_nazwa == "Generalised anxiety disorder"
 
+    def test_search_term_survives_verification(self, fake_who):
+        """Weryfikacja nie może zjeść terminu — na nim opiera się każde następne sprawdzenie."""
+        fake_who(terms={"chronic insomnia": ("7A00", "Chronic insomnia")})
+        confirmed = services.verify_icd_codes(
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="",
+                    description="Bezsenność przewlekła",
+                    termin_wyszukiwania="Chronic insomnia",
+                    confidence=0.7,
+                )
+            ],
+            klasyfikacja="ICD-11",
+        )
+        assert confirmed[0].termin_wyszukiwania == "Chronic insomnia"
+
+        missing = services.verify_icd_codes(
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="",
+                    description="Coś nieznanego",
+                    termin_wyszukiwania="Something unknown",
+                    confidence=0.7,
+                )
+            ],
+            klasyfikacja="ICD-11",
+        )
+        assert missing[0].termin_wyszukiwania == "Something unknown"
+
+    def test_not_found_note_names_the_query(self, fake_who):
+        """Bez tego nie da się odróżnić „szukaliśmy po angielsku" od „poszła polska nazwa"."""
+        fake_who()
+        result = services.verify_icd_codes(
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="",
+                    description="Bezsenność przewlekła",
+                    termin_wyszukiwania="Chronic insomnia",
+                    confidence=0.7,
+                )
+            ],
+            klasyfikacja="ICD-11",
+        )
+        assert "Chronic insomnia" in result[0].uwaga
+
+    def test_not_found_note_reveals_polish_fallback(self, fake_who):
+        fake_who()
+        result = services.verify_icd_codes(
+            [
+                ICDCode(
+                    klasyfikacja="ICD-11",
+                    code="",
+                    description="Bezsenność przewlekła",
+                    confidence=0.7,
+                )
+            ],
+            klasyfikacja="ICD-11",
+        )
+        assert "Bezsenność przewlekła" in result[0].uwaga
+
     def test_polish_name_alone_finds_nothing(self, fake_who):
         """Dowód, po co ta kolumna: rejestr WHO nie zna polskich nazw."""
         fake_who(terms={"generalised anxiety disorder": ("6B00", "Generalised anxiety disorder")})

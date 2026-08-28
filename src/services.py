@@ -250,6 +250,7 @@ def verify_icd_codes(
                     # brzmienie z rejestru idzie OBOK — to ono ujawnia rozjazd kodu
                     # ze znaczeniem, jak przy QE80 opisanym jako zaburzenia snu.
                     description=proposed_name or match.title,
+                    termin_wyszukiwania=search_term,
                     oficjalna_nazwa=match.title,
                     confidence=item.confidence,
                     weryfikacja=StanWeryfikacji.POTWIERDZONY,
@@ -270,6 +271,7 @@ def verify_icd_codes(
                     klasyfikacja=system,
                     code=searched.code,
                     description=proposed_name or searched.title,
+                    termin_wyszukiwania=search_term,
                     oficjalna_nazwa=searched.title,
                     confidence=item.confidence,
                     weryfikacja=StanWeryfikacji.POTWIERDZONY,
@@ -278,10 +280,14 @@ def verify_icd_codes(
                 )
             )
         else:
+            # Podajemy, CZYM szukaliśmy. Bez tego „nie znaleziono" jest nie do
+            # zdiagnozowania: nie widać, czy poszedł angielski termin od modelu,
+            # czy polska nazwa zapasowa, której rejestr WHO i tak nie zna.
             results.append(
                 _unverified(
                     item,
-                    f"Nie znaleziono tego rozpoznania w rejestrze WHO dla {system}. "
+                    f"Nie znaleziono tego rozpoznania w rejestrze WHO dla {system} "
+                    f"(szukaliśmy: „{search_term or '—'}”). "
                     "Zweryfikuj ręcznie przed wpisaniem do dokumentacji.",
                     system,
                 )
@@ -322,6 +328,7 @@ def _unverified(
         klasyfikacja=system or _normalize_klasyfikacja(getattr(item, "klasyfikacja", None)),
         code=(item.code or "").strip(),
         description=(item.description or "").strip(),
+        termin_wyszukiwania=(getattr(item, "termin_wyszukiwania", "") or "").strip(),
         confidence=item.confidence,
         zweryfikowany=False,
         uwaga=note,
