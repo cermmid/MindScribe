@@ -499,15 +499,17 @@ def who_endpoint(monkeypatch):
     def _install(routes):
         calls: list[tuple[str, dict]] = []
 
-        def fake_get(path, *, language, params=None):
+        def fake_request(path, *, language, params=None):
             calls.append((path, dict(params or {})))
             handler = routes.get(path)
             if handler is None:
-                return None
-            return handler(params or {}, language) if callable(handler) else handler
+                return 404, None
+            result = handler(params or {}, language) if callable(handler) else handler
+            # Trasa może zwrócić sam status, żeby udać błąd HTTP.
+            return (result, None) if isinstance(result, int) else (200, result)
 
         monkeypatch.setattr(icd, "_access_token", lambda: "token-testowy")
-        monkeypatch.setattr(icd, "_get", fake_get)
+        monkeypatch.setattr(icd, "_request", fake_request)
         monkeypatch.setitem(icd._release_cache, "id", "")
         return calls
 
@@ -595,6 +597,24 @@ class TestIcd11Search:
         monkeypatch.setitem(icd._release_cache, "id", "")
         with pytest.raises(icd.IcdUnavailable):
             icd.search("anxiety", language="en")
+
+    def test_wrong_address_is_not_reported_as_a_missing_diagnosis(self, who_endpoint):
+        """404 z wyszukiwarki znaczy „zły adres". Wcześniej `_get` mieliło to na pustą listę."""
+        who_endpoint({})  # każda ścieżka odpowiada 404
+        with pytest.raises(icd.IcdUnavailable) as exc:
+            icd.search("generalised anxiety disorder", language="en")
+        assert "404" in str(exc.value)
+
+    def test_server_error_on_every_address_raises(self, who_endpoint):
+        who_endpoint({icd.ICD11_LINEARIZATION + "/search": 503})
+        with pytest.raises(icd.IcdUnavailable):
+            icd.search("anxiety", language="en")
+
+    def test_describe_attempts_separates_the_three_failures(self, who_endpoint):
+        who_endpoint({icd.ICD11_LINEARIZATION + "/search": {"destinationEntities": []}})
+        trace: list[dict] = []
+        icd.search("anxiety", language="en", trace=trace)
+        assert icd.describe_attempts(trace) == "release/11/mms/search: 0 wyników"
 
     def test_trace_records_every_attempt(self, who_endpoint):
         who_endpoint({icd.ICD11_LINEARIZATION + "/search": {"destinationEntities": []}})

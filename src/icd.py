@@ -102,7 +102,13 @@ def _headers(language: str) -> dict[str, str]:
     }
 
 
-def _get(path: str, *, language: str, params: dict | None = None) -> dict | None:
+def _request(path: str, *, language: str, params: dict | None = None) -> tuple[int, dict | None]:
+    """Zapytanie do WHO razem ze statusem HTTP.
+
+    Status jest tu istotny, bo 404 z wyszukiwarki znaczy „zły adres", a nie „nie ma
+    takiego rozpoznania". `_get` zwija jedno w drugie i przez to zły adres wyglądał
+    dokładnie tak samo jak nieistniejące rozpoznanie.
+    """
     try:
         response = requests.get(
             f"{BASE_URL}/{path.lstrip('/')}",
@@ -113,14 +119,22 @@ def _get(path: str, *, language: str, params: dict | None = None) -> dict | None
     except requests.RequestException as exc:
         raise IcdUnavailable(f"Błąd połączenia z WHO: {exc}") from exc
 
-    if response.status_code == 404:
-        return None
     if not response.ok:
-        raise IcdUnavailable(f"WHO odpowiedziało {response.status_code}.")
+        return response.status_code, None
     try:
-        return response.json()
+        return response.status_code, response.json()
     except ValueError as exc:
         raise IcdUnavailable(f"Niepoprawna odpowiedź WHO: {exc}") from exc
+
+
+def _get(path: str, *, language: str, params: dict | None = None) -> dict | None:
+    """Uproszczenie `_request` dla miejsc, którym wystarczy „jest albo nie ma"."""
+    status, payload = _request(path, language=language, params=params)
+    if status == 404:
+        return None
+    if status >= 400:
+        raise IcdUnavailable(f"WHO odpowiedziało {status}.")
+    return payload
 
 
 # --- Parsowanie ----------------------------------------------------------------
@@ -233,6 +247,28 @@ def _note(trace: list[dict] | None, **fields: object) -> None:
         trace.append(dict(fields))
 
 
+def describe_attempts(trace: list[dict]) -> str:
+    """Krótkie podsumowanie prób odpytania, do pokazania obok rozpoznania.
+
+    Bez tego „nie znaleziono" pokrywa trzy zupełnie różne sytuacje: zły adres (404),
+    poprawną odpowiedź bez dopasowań i trafienia, którym brakuje kodu. Wyglądają na
+    ekranie identycznie, a każda wymaga innej naprawy.
+    """
+    summary: list[str] = []
+    for attempt in trace:
+        path = str(attempt.get("path", "?"))
+        if error := attempt.get("error"):
+            summary.append(f"{path}: {error}")
+        elif (status := attempt.get("status")) and int(status) >= 400:
+            summary.append(f"{path}: HTTP {status}")
+        elif api_error := attempt.get("error_message") or attempt.get("api_error"):
+            summary.append(f"{path}: {api_error}")
+        else:
+            summary.append(f"{path}: {attempt.get('entities', 0)} wyników")
+    # Ta sama odpowiedź z czterech wariantów to jedna informacja, nie cztery.
+    return "; ".join(list(dict.fromkeys(summary))[:3])
+
+
 def search(
     term: str,
     *,
@@ -258,6 +294,7 @@ def search(
     _access_token()
 
     last_error: IcdUnavailable | None = None
+    statuses: list[int] = []
     answered = False
 
     for lang in _language_order(language):
@@ -265,10 +302,17 @@ def search(
             for flexi in ("false", "true"):
                 params = {"q": term, "flatResults": "true", "useFlexisearch": flexi}
                 try:
-                    payload = _get(path, language=lang, params=params)
+                    status, payload = _request(path, language=lang, params=params)
                 except IcdUnavailable as exc:
                     last_error = exc
                     _note(trace, path=path, language=lang, flexisearch=flexi, error=str(exc))
+                    continue
+
+                statuses.append(status)
+                if status >= 400:
+                    # 404 na wyszukiwarce nie znaczy „nie ma takiego rozpoznania" —
+                    # znaczy, że pytamy pod złym adresem. Próbujemy następnego wariantu.
+                    _note(trace, path=path, language=lang, flexisearch=flexi, status=status)
                     continue
 
                 answered = True
@@ -279,6 +323,7 @@ def search(
                     path=path,
                     language=lang,
                     flexisearch=flexi,
+                    status=status,
                     entities=len(entities),
                     matches=len(matches),
                     error=_api_error(payload),
@@ -287,10 +332,17 @@ def search(
                     return matches
 
     # Żaden wariant nie dostał poprawnej odpowiedzi — to awaria, nie brak wyniku.
-    # Rozróżnienie jest istotne: lekarz ma zobaczyć „rejestr niedostępny",
+    # Rozróżnienie jest istotne: lekarz ma zobaczyć „rejestr nie odpowiada jak trzeba",
     # a nie „takiego rozpoznania nie ma".
-    if not answered and last_error is not None:
-        raise last_error
+    if not answered:
+        if last_error is not None:
+            raise last_error
+        if statuses:
+            raise IcdUnavailable(
+                "Wyszukiwarka WHO odpowiedziała "
+                + ", ".join(f"HTTP {code}" for code in dict.fromkeys(statuses))
+                + " pod każdym znanym adresem."
+            )
     return []
 
 

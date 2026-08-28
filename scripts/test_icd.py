@@ -43,9 +43,11 @@ def _dump_trace(trace: list[dict]) -> None:
         )
         if error := attempt.get("error"):
             print(f"{head} → BŁĄD: {error}")
+        elif (status := attempt.get("status", 200)) >= 400:
+            print(f"{head} → HTTP {status} (zły adres albo błąd serwera, nie brak wyniku)")
         else:
             print(
-                f"{head} → encji: {attempt.get('entities', 0)}, "
+                f"{head} → HTTP {status}, encji: {attempt.get('entities', 0)}, "
                 f"z kodem: {attempt.get('matches', 0)}"
             )
 

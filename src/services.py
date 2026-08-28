@@ -231,6 +231,7 @@ def verify_icd_codes(
             results.append(_unverified(item, api_down_note, system))
             continue
 
+        trace: list[dict] = []
         try:
             # Też po angielsku: `oficjalna_nazwa` i porównanie rozjazdu niżej mają
             # sens tylko wtedy, gdy obie strony są w tym samym języku.
@@ -241,7 +242,7 @@ def verify_icd_codes(
             )
             searched = None
             if match is None and search_term:
-                candidates = icd.search(search_term, icd11=icd11, language="en")
+                candidates = icd.search(search_term, icd11=icd11, language="en", trace=trace)
                 searched = candidates[0] if candidates else None
         except icd.IcdUnavailable as exc:
             api_down_note = (
@@ -302,12 +303,14 @@ def verify_icd_codes(
             # Podajemy, CZYM szukaliśmy. Bez tego „nie znaleziono" jest nie do
             # zdiagnozowania: nie widać, czy poszedł angielski termin od modelu,
             # czy polska nazwa zapasowa, której rejestr WHO i tak nie zna.
+            detail = icd.describe_attempts(trace)
             results.append(
                 _unverified(
                     item,
                     f"Nie znaleziono tego rozpoznania w rejestrze WHO dla {system} "
-                    f"(szukaliśmy: „{search_term or '—'}”). "
-                    "Zweryfikuj ręcznie przed wpisaniem do dokumentacji.",
+                    f"(szukaliśmy: „{search_term or '—'}”"
+                    + (f"; odpowiedź rejestru — {detail}" if detail else "")
+                    + "). Zweryfikuj ręcznie przed wpisaniem do dokumentacji.",
                     system,
                 )
             )
