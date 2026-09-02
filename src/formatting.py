@@ -202,6 +202,13 @@ def note_to_text(
         lines.extend(f"- {z}" for z in wlasne)
         lines.append("")
 
+    # Leki idą tuż po zaleceniach specjalisty i PRZED propozycjami asystenta — to
+    # ordynacja, a nie sugestia, i nie może sąsiadować z tym, co wymyślił asystent.
+    if leki := (note.get("leki") or []):
+        lines.append("LEKI")
+        lines.extend(f"- {lek}" for lek in leki)
+        lines.append("")
+
     proponowane = note.get("zalecenia_proponowane") or []
     if proponowane:
         lines.append("PROPOZYCJE DO ROZWAŻENIA (od asystenta, nie padły na wizycie)")

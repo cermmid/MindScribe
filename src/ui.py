@@ -78,6 +78,11 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
         for z in wlasne:
             st.markdown(f"- {z}")
 
+    if leki := note.get("leki"):
+        st.markdown("#### Leki")
+        for lek in leki:
+            st.markdown(f"- {lek}")
+
     if proponowane := note.get("zalecenia_proponowane"):
         st.markdown("#### Propozycje do rozważenia")
         st.caption("Sugestie asystenta — nie padły podczas wizyty.")

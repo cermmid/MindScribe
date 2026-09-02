@@ -21,7 +21,7 @@ from src.formatting import (
     note_to_text,
 )
 from src.pricing import estimate_audio_seconds, format_duration
-from src.prompts import build_user_prompt
+from src.prompts import SYSTEM_PROMPT, build_user_prompt
 from src.services import (
     build_corrected_note,
     clean_icd_rows,
@@ -388,6 +388,56 @@ class TestPromptCodeRequirement:
         )
         assert "ICD-10 pole `code` jest **OBOWIĄZKOWE** dokładnie tak samo" in prompt
         assert "`termin_wyszukiwania` jest **OBOWIĄZKOWE**" in prompt
+
+
+class TestMedications:
+    """Leki to ordynacja lekarska — pole wypełnia specjalista, nie asystent."""
+
+    def _note(self, **overrides):
+        base = dict(
+            raw_transcript="t",
+            ryzyko_samobojcze="NIEOBECNE",
+            status_psychiczny="ok",
+            objawy=[],
+            kody_icd=[],
+            zalecenia_terapeuty=[],
+            podsumowanie="p",
+        )
+        base.update(overrides)
+        return build_corrected_note(**base)
+
+    def test_medications_are_kept(self):
+        note = self._note(leki=["sertralina 50 mg rano", "hydroksyzyna 10 mg doraźnie"])
+        assert note.leki == ["sertralina 50 mg rano", "hydroksyzyna 10 mg doraźnie"]
+
+    def test_empty_when_nothing_was_prescribed(self):
+        """Brak leków na wizycie ma zostać pustą listą, a nie czymkolwiek innym."""
+        assert self._note().leki == []
+
+    def test_blank_lines_are_dropped(self):
+        assert self._note(leki=["  ", "sertralina 50 mg", ""]).leki == ["sertralina 50 mg"]
+
+    def test_prompt_forbids_proposing_medications(self):
+        """Najgroźniejszy tryb porażki: model dopisuje 'typową' dawkę do rozpoznania."""
+        assert "`leki`" in SYSTEM_PROMPT
+        assert "zostaw listę PUSTĄ" in SYSTEM_PROMPT
+        assert "nie uzupełniasz" in SYSTEM_PROMPT
+
+    def test_copyable_text_separates_medications_from_proposals(self):
+        note = {
+            "ryzyko_samobojcze": "NIEOBECNE",
+            "zalecenia_terapeuty": ["kontrola za 4 tygodnie"],
+            "leki": ["sertralina 50 mg rano"],
+            "zalecenia_proponowane": ["rozważyć CBT"],
+        }
+        text = note_to_text(note, title="Wizyta #1")
+        assert "LEKI\n- sertralina 50 mg rano" in text
+        # Ordynacja nie może sąsiadować z tym, co wymyślił asystent.
+        assert text.index("LEKI") < text.index("PROPOZYCJE")
+
+    def test_medication_section_absent_when_empty(self):
+        text = note_to_text({"ryzyko_samobojcze": "NIEOBECNE", "leki": []}, title="W")
+        assert "LEKI" not in text
 
 
 class TestSplitRecommendations:

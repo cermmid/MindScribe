@@ -305,6 +305,17 @@ if "current_note" in st.session_state:
         help="To, co faktycznie zaleciłaś/zaleciłeś podczas wizyty.",
     )
 
+    leki_text = st.text_area(
+        "Leki (jeden w linii)",
+        value="\n".join(note_data.get("leki") or []),
+        height=100,
+        help=(
+            "Nazwa, dawka i sposób przyjmowania, na przykład: sertralina 50 mg rano. "
+            "Asystent wpisuje tu wyłącznie to, co padło na wizycie — sam niczego nie proponuje. "
+            "Puste pole znaczy, że leków nie omawiano."
+        ),
+    )
+
     propozycje_text = st.text_area(
         "Propozycje do rozważenia (jedna w linii)",
         value="\n".join(note_data.get("zalecenia_proponowane") or []),
@@ -332,6 +343,7 @@ if "current_note" in st.session_state:
                 kody_icd=edited_icd.to_dict("records"),
                 zalecenia_terapeuty=split_lines(zalecenia_text),
                 zalecenia_proponowane=split_lines(propozycje_text),
+                leki=split_lines(leki_text),
                 podsumowanie=podsumowanie,
                 klasyfikacje=klasyfikacje,
                 jakosc_nagrania=note_data.get("jakosc_nagrania", "DOBRA"),

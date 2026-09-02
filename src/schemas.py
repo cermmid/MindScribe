@@ -145,6 +145,16 @@ class _NoteBase(BaseModel):
             "rozważyć. To sugestie do decyzji specjalisty — nie mieszaj ich z tym, co padło na wizycie."
         ),
     )
+    leki: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Leki, które specjalista FAKTYCZNIE zlecił podczas wizyty — nazwa, dawka i sposób "
+            "przyjmowania dokładnie tak, jak padły w nagraniu, na przykład: sertralina 50 mg rano. "
+            "Pod ŻADNYM pozorem niczego tu nie proponuj, nie uzupełniaj typowych dawek ani nie "
+            "domyślaj się leku z rozpoznania. Jeśli w nagraniu nie padła nazwa leku, zostaw "
+            "tę listę PUSTĄ. To ordynacja lekarska — wymyślona dawka jest niebezpieczna."
+        ),
+    )
     podsumowanie: str = Field(
         description="Krótkie 2-3 zdaniowe podsumowanie wizyty."
     )

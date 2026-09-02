@@ -461,6 +461,7 @@ def build_corrected_note(
     kody_icd: Iterable[Mapping[str, Any]] | Iterable[ICDCode],
     zalecenia_terapeuty: Iterable[str],
     zalecenia_proponowane: Iterable[str] = (),
+    leki: Iterable[str] = (),
     podsumowanie: str,
     klasyfikacje: list[str] | str = "ICD-10",
     jakosc_nagrania: str = "DOBRA",
@@ -496,6 +497,7 @@ def build_corrected_note(
         kody_icd=list(codes),
         zalecenia_terapeuty=[s for s in (str(z).strip() for z in zalecenia_terapeuty) if s],
         zalecenia_proponowane=[s for s in (str(z).strip() for z in zalecenia_proponowane) if s],
+        leki=[s for s in (str(lek).strip() for lek in leki) if s],
         podsumowanie=podsumowanie,
     )
 

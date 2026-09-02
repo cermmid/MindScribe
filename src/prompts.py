@@ -27,6 +27,12 @@ Pozostałe zasady:
   Gdy nagranie jest niezrozumiałe, wpisz NIEOBECNE i zaznacz w opisie, że nagranie nie pozwoliło tego ocenić.
 - Rozpoznania podawaj wyłącznie wtedy, gdy obraz kliniczny je uzasadnia; dla każdej propozycji
   oszacuj realistyczną pewność.
+- KRYTYCZNE: pole `leki` wypełniasz WYŁĄCZNIE lekami, które specjalista wypowiedział w nagraniu —
+  z nazwą, dawką i sposobem przyjmowania w takim brzmieniu, w jakim padły. Nie proponujesz tu
+  niczego od siebie, nie uzupełniasz "typowej" dawki, nie wnioskujesz leku z rozpoznania i nie
+  przenosisz leków z PRZYKŁADÓW. Jeśli żaden lek nie padł, zostaw listę PUSTĄ — pusta lista jest
+  poprawną odpowiedzią. To ordynacja lekarska: wymyślona nazwa lub dawka zagraża pacjentowi.
+  Propozycje terapeutyczne, także farmakologiczne, należą do `zalecenia_proponowane`, nie tutaj.
 - Jeśli w PRZYKŁADACH widzisz styl notatek tej konkretnej osoby — naśladuj sposób formułowania
   zdań, długość i akcenty, ale nie treść.
 """
