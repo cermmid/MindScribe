@@ -98,11 +98,16 @@ def build_user_prompt(
         # Gdy rejestr czegoś nie znajdzie albo jest nieosiągalny, wpis zostaje bez kodu
         # i jest dla specjalisty bezwartościowy. Kod ma być zawsze — rejestr go
         # potwierdza albo poprawia, a niepotwierdzony jest wyraźnie oznaczony.
+        # Furtka „gdy nie masz pojęcia, zostaw puste" była nadużywana — model wybierał
+        # ją niemal zawsze i kolumna z kodem wracała pusta. Pusty kod nie jest
+        # ostrożnością, tylko brakiem odpowiedzi; ostrożność wyraża `confidence`.
         rule.append(
-            f"Dla {', '.join(checked)} pole `code` też wypełnij — podaj swój najlepszy kod. "
-            "Zostanie sprawdzony w oficjalnym rejestrze WHO i w razie potrzeby poprawiony, "
-            "a jeśli nie da się go potwierdzić, specjalista zobaczy wyraźne ostrzeżenie. "
-            "Nie zmyślaj jednak kodu na siłę: gdy naprawdę nie masz pojęcia, zostaw pole puste."
+            f"Dla {', '.join(checked)} pole `code` jest **OBOWIĄZKOWE** dokładnie tak samo. "
+            "Podaj swój najlepszy kod, nawet jeśli nie masz pewności — zostanie sprawdzony "
+            "w oficjalnym rejestrze WHO i w razie potrzeby poprawiony, a niepotwierdzony "
+            "dostanie wyraźne ostrzeżenie dla specjalisty. Niepewność wyrażaj **niższym "
+            "`confidence`**, nie pustym polem: puste pole nie jest ostrożnością, tylko "
+            "brakiem odpowiedzi, i jest bezużyteczne."
         )
         rule.append(
             f"Za to dla {', '.join(checked)} pole `termin_wyszukiwania` jest **OBOWIĄZKOWE**: wpisz "

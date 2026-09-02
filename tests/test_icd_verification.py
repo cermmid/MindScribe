@@ -522,6 +522,36 @@ class TestReleaseResolution:
         assert icd._release_id() == "2025-01"
         assert icd._mms_prefix() == "release/11/2025-01/mms"
 
+    def test_reads_the_releases_list(self, who_endpoint):
+        """`@id` listy wydań to sam „release/11" — numer jest wyłącznie w `releases`."""
+        who_endpoint(
+            {
+                icd.ICD11_RELEASES: {
+                    "@id": "http://id.who.int/icd/release/11",
+                    "releases": [
+                        "http://id.who.int/icd/release/11/2025-01",
+                        "http://id.who.int/icd/release/11/2024-01",
+                    ],
+                }
+            }
+        )
+        assert icd._release_id() == "2025-01"
+
+    def test_picks_the_newest_release(self, who_endpoint):
+        who_endpoint(
+            {
+                icd.ICD11_RELEASES: {
+                    "@id": "http://id.who.int/icd/release/11",
+                    "release": [
+                        "http://id.who.int/icd/release/11/2022-02",
+                        "http://id.who.int/icd/release/11/2025-01",
+                        "http://id.who.int/icd/release/11/2023-01",
+                    ],
+                }
+            }
+        )
+        assert icd._release_id() == "2025-01"
+
     def test_falls_back_to_uri(self, who_endpoint):
         who_endpoint(
             {icd.ICD11_LINEARIZATION: {"@id": "http://id.who.int/icd/release/11/2024-01/mms"}}

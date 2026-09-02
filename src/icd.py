@@ -34,6 +34,7 @@ ICD10_RELEASE = "release/10/2019"
 _TIMEOUT = 8
 _TAG_RE = re.compile(r"<[^>]+>")
 _RELEASE_RE = re.compile(r"/release/11/(\d{4}-\d{2})\b")
+_RELEASE_ID_RE = re.compile(r"\d{4}-\d{2}")
 _ENTITY_ID_RE = re.compile(r"/(\d+)/?$")
 
 # Ile encji bez kodu próbujemy jeszcze rozwiązać przez linearyzację. Każda to osobne
@@ -179,23 +180,37 @@ def _release_id() -> str:
     if _release_cache["id"]:
         return _release_cache["id"]
 
-    for path in (ICD11_LINEARIZATION, ICD11_RELEASES):
+    for path in (ICD11_RELEASES, ICD11_LINEARIZATION):
         try:
             payload = _get(path, language="en") or {}
         except IcdUnavailable:
             continue
-        release = str(payload.get("releaseId") or "").strip()
-        if not release:
-            uri = str(payload.get("@id") or payload.get("latestRelease") or "")
-            if not uri:
-                listed = payload.get("release") or payload.get("releases") or []
-                uri = str(listed[0]) if isinstance(listed, list) and listed else ""
-            found = _RELEASE_RE.search(uri)
-            release = found.group(1) if found else ""
-        if release:
+        if release := _release_from_payload(payload):
             _release_cache["id"] = release
             return release
     return ""
+
+
+def _release_from_payload(payload: dict) -> str:
+    """Wyłów numer wydania z odpowiedzi WHO, skądkolwiek da się go odczytać.
+
+    Lista wydań podaje je w `releases`, a `@id` wskazuje wtedy sam `release/11` —
+    bez numeru. Branie pierwszego niepustego adresu (a `@id` jest zawsze) znaczyło,
+    że listy wydań nigdy nie oglądaliśmy i numer zostawał nieustalony.
+    """
+    direct = str(payload.get("releaseId") or "").strip()
+    if _RELEASE_ID_RE.fullmatch(direct):
+        return direct
+
+    candidates = [str(payload.get(key) or "") for key in ("latestRelease", "@id")]
+    for key in ("release", "releases"):
+        listed = payload.get(key)
+        if isinstance(listed, list):
+            candidates.extend(str(item) for item in listed)
+
+    found = {m.group(1) for c in candidates if (m := _RELEASE_RE.search(c))}
+    # Kolejność na liście to konwencja, nie gwarancja — bierzemy najnowsze wydanie.
+    return max(found) if found else ""
 
 
 def _mms_prefix() -> str:

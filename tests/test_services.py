@@ -349,13 +349,14 @@ class TestPromptCodeRequirement:
         assert "ICD-10 pole `code` jest **OBOWIĄZKOWE**" in prompt
         assert "możesz zostawić PUSTE" not in prompt
 
-    def test_looked_up_system_still_asks_for_a_code(self):
+    def test_looked_up_system_demands_a_code_too(self):
         """Pusty kod to wpis bezużyteczny, gdy rejestr zawiedzie — model ma podać swój."""
         prompt = build_user_prompt([], klasyfikacje=["ICD-11"], lookup_systems=["ICD-11"])
-        assert "ICD-11 pole `code` też wypełnij" in prompt
-        assert "poprawiony" in prompt
-        # …ale bez przymusu, żeby nie zachęcać do zmyślania kodu na siłę.
-        assert "pole `code` jest **OBOWIĄZKOWE**" not in prompt
+        assert "ICD-11 pole `code` jest **OBOWIĄZKOWE**" in prompt
+        # Niepewność ma iść w `confidence`, nie w puste pole — inaczej model wybiera
+        # pustkę zawsze, bo jest bezpieczna dla niego i bezużyteczna dla lekarza.
+        assert "confidence" in prompt
+        assert "zostaw pole puste" not in prompt
 
     def test_english_term_demanded_for_looked_up_systems(self):
         """Rejestr WHO nie zna polskich nazw — bez angielskiego terminu nic nie znajdziemy."""
@@ -378,15 +379,15 @@ class TestPromptCodeRequirement:
             [], klasyfikacje=["ICD-10", "ICD-11"], lookup_systems=["ICD-11"]
         )
         assert "ICD-10 pole `code` jest **OBOWIĄZKOWE**" in prompt
-        assert "ICD-11 pole `code` też wypełnij" in prompt
+        assert "ICD-11 pole `code` jest **OBOWIĄZKOWE**" in prompt
 
     def test_icd10_switches_rule_when_lookup_enabled(self):
         """Po włączeniu VERIFY_ICD10 ICD-10 przechodzi pod regułę klasyfikacji sprawdzanych."""
         prompt = build_user_prompt(
             [], klasyfikacje=["ICD-10"], lookup_systems=["ICD-11", "ICD-10"]
         )
-        assert "ICD-10 pole `code` też wypełnij" in prompt
-        assert "jest **OBOWIĄZKOWE**" not in prompt.split("`termin_wyszukiwania`")[0]
+        assert "ICD-10 pole `code` jest **OBOWIĄZKOWE** dokładnie tak samo" in prompt
+        assert "`termin_wyszukiwania` jest **OBOWIĄZKOWE**" in prompt
 
 
 class TestSplitRecommendations:
