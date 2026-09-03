@@ -172,6 +172,13 @@ def note_to_text(
         lines.extend(f"- {o}" for o in objawy)
         lines.append("")
 
+    # Objaw zanegowany to udokumentowany negatyw — ma wartość kliniczną, ale musi
+    # stać osobno, żeby nikt nie odczytał go jako obecnego.
+    if nieobecne := (note.get("objawy_nieobecne") or []):
+        lines.append("OBJAWY NIEOBECNE (zanegowane lub ustąpiłe)")
+        lines.extend(f"- {o}" for o in nieobecne)
+        lines.append("")
+
     grouped = group_codes_by_classification(note)
     if grouped:
         any_unverified = False

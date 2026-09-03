@@ -129,7 +129,21 @@ class _NoteBase(BaseModel):
     )
     objawy: list[str] = Field(
         default_factory=list,
-        description="Lista konkretnych objawów zgłoszonych lub zaobserwowanych podczas wizyty.",
+        description=(
+            "Objawy, które pacjent ma AKTUALNIE — zgłoszone jako trwające albo "
+            "zaobserwowane podczas wizyty. NIE wpisuj tu objawów, którym pacjent "
+            "zaprzeczył, ani takich, które już ustąpiły; te idą do `objawy_nieobecne`."
+        ),
+    )
+    objawy_nieobecne: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Objawy, o które pytano, a pacjent im ZAPRZECZYŁ, oraz takie, które "
+            "USTĄPIŁY. Przy każdym zaznacz którą sytuację opisujesz, na przykład: "
+            "myśli rezygnacyjne - neguje; albo: bezsenność - ustąpiła miesiąc temu. "
+            "Udokumentowany objaw nieobecny ma wartość kliniczną, więc nie pomijaj go — "
+            "przenieś tutaj, zamiast wpisywać do `objawy`."
+        ),
     )
     zalecenia_terapeuty: list[str] = Field(
         default_factory=list,

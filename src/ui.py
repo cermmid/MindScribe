@@ -49,6 +49,12 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
         for o in note["objawy"]:
             st.markdown(f"- {o}")
 
+    if nieobecne := note.get("objawy_nieobecne"):
+        st.markdown("#### Objawy nieobecne")
+        st.caption("Zanegowane przez pacjenta albo takie, które ustąpiły.")
+        for o in nieobecne:
+            st.markdown(f"- {o}")
+
     if grouped := group_codes_by_classification(note):
         all_codes = [k for kody in grouped.values() for k in kody]
         unverified = [k for k in all_codes if needs_manual_check(k)]

@@ -1,14 +1,67 @@
-"""Gemini 2.5 Flash pricing.
+"""Wycena zużycia Gemini — per model i per próg kontekstu.
 
-Stawki USD per 1M tokens — sprawdź i zaktualizuj na https://ai.google.dev/gemini-api/docs/pricing.
-Domyślne wartości to publiczna cena Gemini 2.5 Flash (paid tier) z 2025/2026.
+Stawki USD za 1M tokenów. Sprawdź i zaktualizuj na
+https://ai.google.dev/gemini-api/docs/pricing — cała tabela do poprawienia siedzi
+w jednym bloku niżej, nic poza nim nie zawiera liczb z cennika.
+
+Dlaczego per model: wcześniej stawki były zaszyte na sztywno dla Gemini 2.5 Flash.
+Zmiana `GEMINI_MODEL` na Pro dawała koszt policzony po cenach Flasha — **ponad
+dwukrotnie zaniżony, bez żadnego sygnału**. Panel właściciela pokazywałby wtedy
+spadek kosztów po przejściu na droższy model, co czyta się jak dobra wiadomość.
+
+Tokeny „myślenia" są rozliczane jak wyjście — przy Pro to główny składnik rachunku.
+Tokenów z cache (`cached_content_token_count`) ten pipeline nie używa i ich nie liczymy.
 """
 
-PRICING_USD_PER_1M: dict[str, float] = {
-    "text_input": 0.30,
-    "audio_input": 1.00,
-    "output": 2.50,
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Rates:
+    """Stawki USD za 1M tokenów w jednej taryfie."""
+
+    text_input: float
+    audio_input: float
+    output: float  # obejmuje tokeny „myślenia"
+
+
+@dataclass(frozen=True)
+class ModelPricing:
+    standard: Rates
+    # Modele Pro mają wyższą taryfę powyżej progu tokenów promptu. 200 tys. tokenów
+    # to ~1 h 44 min nagrania, więc przy długiej wizycie to realny scenariusz.
+    long_context: Rates | None = None
+    long_context_threshold: int | None = None
+
+
+# --- Jedyne miejsce z liczbami z cennika ---------------------------------------
+
+PRICES_CHECKED_ON = "2026-09-03"
+# Ceny pochodzą ze źródeł wtórnych — oficjalne domeny Google były niedostępne przy
+# ich ustalaniu. Potwierdź w konsoli Google Cloud, zanim oprzesz na nich wycenę usługi.
+PRICES_ARE_PROVISIONAL = True
+
+MODEL_PRICING_USD_PER_1M: dict[str, ModelPricing] = {
+    "gemini-2.5-flash": ModelPricing(standard=Rates(0.30, 1.00, 2.50)),
+    "gemini-2.5-pro": ModelPricing(
+        standard=Rates(1.25, 1.25, 10.00),
+        long_context=Rates(2.50, 2.50, 15.00),
+        long_context_threshold=200_000,
+    ),
 }
+
+# Wydania datowane i preview mają cennik rodziny — wpisujemy je jawnie, bo
+# dopasowanie po prefiksie byłoby zgadywaniem (patrz `_resolve_model`).
+MODEL_ALIASES: dict[str, str] = {
+    "gemini-2.5-pro-preview-06-05": "gemini-2.5-pro",
+    "gemini-2.5-flash-preview-05-20": "gemini-2.5-flash",
+}
+
+# Modele, o których wiemy, że istnieją, ale nie mamy potwierdzonych stawek.
+# Mają świadomie iść ścieżką „model nieznany", a nie udawać znany cennik.
+UNPRICED_MODELS: frozenset[str] = frozenset(
+    {"gemini-2.5-flash-lite", "gemini-3-flash", "gemini-3-pro"}
+)
 
 
 def usd_to_pln(usd: float, rate: float) -> float:
@@ -75,13 +128,76 @@ def _modality_breakdown(prompt_details) -> dict[str, int]:
     return out
 
 
-def estimate_usage_and_cost(usage_metadata) -> dict:
-    """Return a flat dict with token counts and USD cost estimate.
+def normalize_model_id(model: str | None) -> str:
+    """„publishers/google/models/gemini-2.5-pro@001" → „gemini-2.5-pro"."""
+    name = (model or "").strip().lower()
+    for prefix in ("publishers/google/models/", "models/"):
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+    return name.split("@", 1)[0]
 
-    Falls back to charging the full prompt at the audio rate when the SDK
-    doesn't break prompt tokens down by modality — that's the conservative
-    estimate for our pipeline (audio input dominates).
+
+def _fallback_rates() -> Rates:
+    """Najdroższa znana stawka w każdej pozycji z osobna.
+
+    Liczona z tabeli, nie wpisana na sztywno: dodanie droższego modelu automatycznie
+    podnosi podłogę, więc stawka zapasowa nie może się rozjechać z rzeczywistością.
     """
+    tiers = [
+        tier
+        for pricing in MODEL_PRICING_USD_PER_1M.values()
+        for tier in (pricing.standard, pricing.long_context)
+        if tier is not None
+    ]
+    return Rates(
+        text_input=max(t.text_input for t in tiers),
+        audio_input=max(t.audio_input for t in tiers),
+        output=max(t.output for t in tiers),
+    )
+
+
+def is_priced(model: str | None) -> bool:
+    """Czy dla tego modelu mamy potwierdzone stawki."""
+    name = normalize_model_id(model)
+    name = MODEL_ALIASES.get(name, name)
+    return name not in UNPRICED_MODELS and name in MODEL_PRICING_USD_PER_1M
+
+
+def resolve_rates(model: str | None, prompt_tokens: int) -> tuple[Rates, str, bool]:
+    """Stawki dla modelu i wielkości promptu → (stawki, nazwa taryfy, czy znane).
+
+    Dopasowanie jest dokładne (po normalizacji i aliasach), NIE prefiksowe. Prefiks
+    wyceniłby `gemini-2.5-flash-lite` po pełnych stawkach Flasha i sprawił, że
+    nieznana rodzina wyglądałaby na znaną — dokładnie ta cicha nieprawda, którą
+    ten moduł ma likwidować.
+    """
+    name = normalize_model_id(model)
+    name = MODEL_ALIASES.get(name, name)
+    pricing = None if name in UNPRICED_MODELS else MODEL_PRICING_USD_PER_1M.get(name)
+    if pricing is None:
+        return _fallback_rates(), "fallback", False
+
+    threshold = pricing.long_context_threshold
+    if pricing.long_context is not None and threshold is not None and prompt_tokens > threshold:
+        return pricing.long_context, "long_context", True
+    return pricing.standard, "standard", True
+
+
+def estimate_usage_and_cost(usage_metadata, *, model: str) -> dict:
+    """Liczniki tokenów i szacunek kosztu w USD dla jednego wywołania.
+
+    `model` jest **wymagany i bez wartości domyślnej**. Domyślna kazałaby temu
+    modułowi importować konfigurację i przywróciłaby cichy default, przez który
+    koszty potrafiły być liczone po cenniku innego modelu; brak domyślnej sprawia,
+    że wywołanie bez modelu wywala się głośno, w testach.
+
+    Gdy SDK nie poda rozbicia modalności, cały prompt liczymy po stawce audio —
+    to konserwatywne oszacowanie dla tego pipeline'u, w którym audio dominuje.
+    """
+    rates, tier, pricing_known = resolve_rates(
+        model, int(getattr(usage_metadata, "prompt_token_count", 0) or 0)
+    )
+
     if usage_metadata is None:
         return {
             "prompt_tokens": 0,
@@ -92,6 +208,9 @@ def estimate_usage_and_cost(usage_metadata) -> dict:
             "prompt_text_tokens": 0,
             "modality_known": False,
             "estimated_cost_usd": 0.0,
+            "model": normalize_model_id(model),
+            "pricing_known": pricing_known,
+            "pricing_tier": tier,
         }
 
     prompt_total = int(getattr(usage_metadata, "prompt_token_count", 0) or 0)
@@ -112,11 +231,13 @@ def estimate_usage_and_cost(usage_metadata) -> dict:
         audio_tokens = prompt_total
         text_tokens = 0
 
+    # Taryfa wybrana rozmiarem promptu wycenia CAŁE żądanie, także wyjście:
+    # krótka odpowiedź na prompt 250-tysięczny idzie po stawce długiego kontekstu.
     billable_output = output_total + thoughts_total
     cost = (
-        audio_tokens * PRICING_USD_PER_1M["audio_input"]
-        + text_tokens * PRICING_USD_PER_1M["text_input"]
-        + billable_output * PRICING_USD_PER_1M["output"]
+        audio_tokens * rates.audio_input
+        + text_tokens * rates.text_input
+        + billable_output * rates.output
     ) / 1_000_000
 
     return {
@@ -128,4 +249,7 @@ def estimate_usage_and_cost(usage_metadata) -> dict:
         "prompt_text_tokens": text_tokens,
         "modality_known": modality_known,
         "estimated_cost_usd": round(cost, 6),
+        "model": normalize_model_id(model),
+        "pricing_known": pricing_known,
+        "pricing_tier": tier,
     }

@@ -10,9 +10,11 @@ from .config import (
     GCP_PROJECT_ID,
     GEMINI_API_KEY,
     GEMINI_MODEL,
+    GEMINI_THINKING_BUDGET,
     USE_VERTEX_AI,
     VERIFY_ICD10,
     _gcp_credentials_info,
+    thinking_budget_for,
 )
 from .pricing import estimate_usage_and_cost
 from .prompts import DEFAULT_LOOKUP_SYSTEMS, SYSTEM_PROMPT, build_user_prompt
@@ -69,12 +71,6 @@ def _client() -> genai.Client:
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
-# Budżet tokenów "myślenia" (Gemini 2.5). Niski, bo zadanie audio→ustrukturyzowana
-# notatka nie wymaga długiego rozumowania. 0 = wyłączone; tu zostawiamy minimalny
-# margines na poprawność wyciągania pól. Zwiększ, jeśli jakość notatek spadnie.
-THINKING_BUDGET = 256
-
-
 def _lookup_systems() -> list[str]:
     """Klasyfikacje, dla których sami ustalimy kod — model może je zostawić puste."""
     return [*DEFAULT_LOOKUP_SYSTEMS, "ICD-10"] if VERIFY_ICD10 else list(DEFAULT_LOOKUP_SYSTEMS)
@@ -86,7 +82,21 @@ def _generation_config() -> types.GenerateContentConfig:
         response_mime_type="application/json",
         response_schema=PsychiatricNoteDraft,
         temperature=0.2,
-        thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
+        thinking_config=types.ThinkingConfig(
+            thinking_budget=thinking_budget_for(GEMINI_MODEL, GEMINI_THINKING_BUDGET)
+        ),
+    )
+
+
+def _usage_of(response) -> dict:
+    """Zużycie i koszt, wyceniane po modelu, który FAKTYCZNIE odpowiedział.
+
+    `model_version` bierzemy przed `GEMINI_MODEL`, bo konfiguracja może wskazywać
+    alias (np. `…-latest`), a rachunek wystawia się za wydanie, które policzyło.
+    """
+    return estimate_usage_and_cost(
+        getattr(response, "usage_metadata", None),
+        model=getattr(response, "model_version", None) or GEMINI_MODEL,
     )
 
 
@@ -127,7 +137,7 @@ def generate_note_from_audio(
         contents=[prompt, audio_part],
         config=_generation_config(),
     )
-    usage = estimate_usage_and_cost(getattr(response, "usage_metadata", None))
+    usage = _usage_of(response)
     return _parse(response), prompt, usage
 
 
@@ -150,5 +160,5 @@ def generate_note_from_text(
         contents=[prompt],
         config=_generation_config(),
     )
-    usage = estimate_usage_and_cost(getattr(response, "usage_metadata", None))
+    usage = _usage_of(response)
     return _parse(response), prompt, usage

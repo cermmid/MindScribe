@@ -63,6 +63,12 @@ visits = sa.Table(
     sa.Column("estimated_cost_usd", sa.Numeric(14, 6), server_default="0"),
     sa.Column("prompt_audio_tokens", sa.BigInteger, server_default="0"),
     sa.Column("audio_duration_seconds", sa.Float),
+    # Model, który policzył tę wizytę, i czy znaliśmy jego cennik. Bez tego koszty
+    # historyczne są nieprzypisywalne: po zmianie modelu nie da się odróżnić, które
+    # wiersze wyceniono po którym cenniku, ani które są tylko górnym oszacowaniem.
+    sa.Column("gemini_model", sa.Text),
+    # `true`, nie `1` — Postgres odrzuca liczbę jako domyślną wartość kolumny boolean.
+    sa.Column("pricing_known", sa.Boolean, server_default=sa.text("true")),
     # Każdy odczyt filtruje po właścicielu — bez tego indeksu skanowalibyśmy całość.
     sa.Index("ix_visits_owner", "doctor_id", "id"),
 )
@@ -222,6 +228,8 @@ def insert_visit(
                 usage.get("prompt_audio_tokens", 0) if usage.get("modality_known") else 0
             ),
             audio_duration_seconds=audio_duration_seconds,
+            gemini_model=usage.get("model") or None,
+            pricing_known=bool(usage.get("pricing_known", True)),
         )
         # `lastrowid` nie działa pod psycopg — id musi wrócić z samego zapytania.
         .returning(visits.c.id)
@@ -386,6 +394,8 @@ def admin_visit_durations() -> list[dict[str, Any]]:
         visits.c.audio_duration_seconds,
         visits.c.prompt_audio_tokens,
         visits.c.estimated_cost_usd,
+        visits.c.gemini_model,
+        visits.c.pricing_known,
     ).order_by(visits.c.id.desc())
     with _conn() as conn:
         return [_row(r) for r in conn.execute(stmt)]

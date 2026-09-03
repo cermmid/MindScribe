@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.audio import looks_silent, resolve_audio_mime
+from src.config import _as_int, thinking_budget_for
 from src.formatting import (
     audio_quality_label,
     audio_unusable,
@@ -388,6 +389,95 @@ class TestPromptCodeRequirement:
         )
         assert "ICD-10 pole `code` jest **OBOWIĄZKOWE** dokładnie tak samo" in prompt
         assert "`termin_wyszukiwania` jest **OBOWIĄZKOWE**" in prompt
+
+
+class TestSymptomsPresentVsAbsent:
+    """Zgłoszony błąd: model opisywał jako obecne objawy, którym pacjent zaprzeczył."""
+
+    def _note(self, **overrides):
+        base = dict(
+            raw_transcript="t",
+            ryzyko_samobojcze="NIEOBECNE",
+            status_psychiczny="ok",
+            objawy=[],
+            kody_icd=[],
+            zalecenia_terapeuty=[],
+            podsumowanie="p",
+        )
+        base.update(overrides)
+        return build_corrected_note(**base)
+
+    def test_absent_symptoms_are_kept_separately(self):
+        note = self._note(
+            objawy=["obniżony nastrój"],
+            objawy_nieobecne=["myśli rezygnacyjne - neguje", "bezsenność - ustąpiła"],
+        )
+        assert note.objawy == ["obniżony nastrój"]
+        assert note.objawy_nieobecne == [
+            "myśli rezygnacyjne - neguje",
+            "bezsenność - ustąpiła",
+        ]
+
+    def test_defaults_to_empty(self):
+        assert self._note(objawy=["lęk"]).objawy_nieobecne == []
+
+    def test_blank_lines_are_dropped(self):
+        assert self._note(objawy_nieobecne=["", "  ", "neguje lęk"]).objawy_nieobecne == [
+            "neguje lęk"
+        ]
+
+    def test_prompt_demands_the_distinction(self):
+        assert "`objawy_nieobecne`" in SYSTEM_PROMPT
+        assert "ZAPRZECZYŁ" in SYSTEM_PROMPT
+        assert "USTĄPIŁ" in SYSTEM_PROMPT
+
+    def test_copyable_text_separates_the_two_lists(self):
+        note = {
+            "ryzyko_samobojcze": "NIEOBECNE",
+            "objawy": ["obniżony nastrój"],
+            "objawy_nieobecne": ["myśli rezygnacyjne - neguje"],
+        }
+        text = note_to_text(note, title="Wizyta #1")
+        assert "OBJAWY\n- obniżony nastrój" in text
+        assert "OBJAWY NIEOBECNE (zanegowane lub ustąpiłe)" in text
+        assert text.index("OBJAWY\n") < text.index("OBJAWY NIEOBECNE")
+
+    def test_section_absent_when_empty(self):
+        text = note_to_text(
+            {"ryzyko_samobojcze": "NIEOBECNE", "objawy": ["lęk"]}, title="W"
+        )
+        assert "OBJAWY NIEOBECNE" not in text
+
+
+class TestThinkingBudget:
+    """Model Pro nie umie wyłączyć myślenia — zły budżet ma być przycięty, nie odrzucony."""
+
+    def test_pro_budget_is_raised_to_the_minimum(self):
+        assert thinking_budget_for("gemini-2.5-pro", 0) == 128
+        assert thinking_budget_for("gemini-2.5-pro", 64) == 128
+
+    def test_valid_budget_passes_through(self):
+        assert thinking_budget_for("gemini-2.5-pro", 8192) == 8192
+
+    def test_dynamic_budget_is_left_alone(self):
+        assert thinking_budget_for("gemini-2.5-pro", -1) == -1
+
+    def test_flash_may_disable_thinking(self):
+        assert thinking_budget_for("gemini-2.5-flash", 0) == 0
+
+
+class TestIntConfigParsing:
+    """Literówka w sekrecie nie może wywalić startu aplikacji."""
+
+    def test_parses_a_number(self):
+        assert _as_int("2048", 8192) == 2048
+
+    @pytest.mark.parametrize("bad", ["", None, "abc", "  "])
+    def test_falls_back_on_junk(self, bad):
+        assert _as_int(bad, 8192) == 8192
+
+    def test_allows_dynamic_sentinel(self):
+        assert _as_int("-1", 8192) == -1
 
 
 class TestMedications:

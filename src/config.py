@@ -29,6 +29,18 @@ def _as_bool(v) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _as_int(v, default: int) -> int:
+    """Liczba z env/sekretów, z wartością zapasową przy braku albo śmieciu.
+
+    Literówka w sekrecie nie może wywalić startu aplikacji — lepiej wejść
+    z domyślną wartością niż nie wejść wcale.
+    """
+    try:
+        return int(str(v).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def _database_url() -> str:
     """Adres bazy. Bez konfiguracji — lokalny SQLite, żeby dev i testy działały bez serwera.
 
@@ -49,7 +61,35 @@ def _database_url() -> str:
 DATABASE_URL = _database_url()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or _from_secrets("GEMINI_API_KEY") or ""
-GEMINI_MODEL = os.getenv("GEMINI_MODEL") or _from_secrets("GEMINI_MODEL") or "gemini-2.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL") or _from_secrets("GEMINI_MODEL") or "gemini-2.5-pro"
+
+# Budżet tokenów „myślenia". 8192 to domyślna wartość Google dla 2.5 Pro — schodzenie
+# poniżej niej oszczędza grosze i psuje to, po co ten model tu jest. Wcześniejsze 256
+# było wartością z czasów Flasha i przy długiej wizycie okazało się za małe: model
+# mylił objawy aktualne z tymi, które pacjent zanegował.
+#
+# Uwaga na koszt: te tokeny są płatne jak wyjście, przy Pro $10/1M — to one, a nie
+# audio, odpowiadają za wzrost rachunku. `-1` znaczy dynamiczny (model decyduje sam),
+# ale wtedy koszt wizyty przestaje być przewidywalny.
+GEMINI_THINKING_BUDGET = _as_int(
+    os.getenv("GEMINI_THINKING_BUDGET") or _from_secrets("GEMINI_THINKING_BUDGET"), 8192
+)
+
+# Modele, które nie potrafią wyłączyć myślenia — minimalny dopuszczalny budżet.
+# `gemini-2.5-pro` odrzuca 0, a poniżej 128 zwraca 400.
+_MIN_THINKING_BUDGET = {"gemini-2.5-pro": 128}
+
+
+def thinking_budget_for(model: str, budget: int) -> int:
+    """Przytnij budżet myślenia do wartości, którą ten model przyjmie.
+
+    Przycinamy, zamiast pozwolić API zwrócić 400. Twardy błąd wypadłby dopiero po
+    wysłaniu 45-minutowego audio — czyli po opłaceniu jego przetworzenia i w środku
+    prawdziwej wizyty.
+    """
+    if budget == -1:  # dynamiczny — model decyduje sam, zawsze dopuszczalny
+        return budget
+    return max(budget, _MIN_THINKING_BUDGET.get((model or "").strip().lower(), 0))
 
 # Poświadczenia do API WHO (icd.who.int/icdapi) — weryfikacja kodów rozpoznań.
 # Bez nich aplikacja działa, ale kody zostają oznaczone jako niezweryfikowane.
@@ -121,4 +161,7 @@ def _gcp_credentials_info() -> dict | None:
     return None
 
 
-FEW_SHOT_LIMIT = 3
+# Ile zatwierdzonych notatek doklejamy jako wzorzec stylu. Do promptu trafiają razem
+# z transkrypcjami, więc gdyby model zaczął przenosić z nich treść do nowej notatki,
+# `FEW_SHOT_LIMIT=0` wyłącza je bez zmiany kodu.
+FEW_SHOT_LIMIT = _as_int(os.getenv("FEW_SHOT_LIMIT") or _from_secrets("FEW_SHOT_LIMIT"), 3)

@@ -70,7 +70,8 @@ Cel: wysyłasz link, a odbiorca zakłada konto i korzysta — nic nie instaluje.
 4. **Advanced settings → Secrets** — wklej (wartości weź ze swojego `.streamlit/secrets.toml`):
    ```toml
    GEMINI_API_KEY = "..."
-   GEMINI_MODEL = "gemini-2.5-flash"
+   GEMINI_MODEL = "gemini-2.5-pro"
+   GEMINI_THINKING_BUDGET = 8192
    # logowanie: patrz sekcja "Logowanie i separacja danych"
    ```
 5. **Deploy**. Po ~2 minutach apka żyje. Wysyłasz lekarzowi:
@@ -187,6 +188,24 @@ Lekarz zaznacza jedną albo kilka naraz — przy kilku to samo rozpoznanie dosta
 **DSM-5 działa inaczej i trzeba o tym wiedzieć.** Wydaje go Amerykańskie Towarzystwo Psychiatryczne, jest objęty prawem autorskim i **nie ma publicznego rejestru do odpytania** — odpowiednika API WHO po prostu nie ma. Dlatego rozpoznania DSM-5 **zawsze** wracają oznaczone do weryfikacji, niezależnie od tego, jak pewny jest model.
 
 Ponieważ DSM-5 posługuje się kodami ICD-10-CM, gdy model poda kod, robimy pomocniczą kontrolę w ICD-10 i dopisujemy jej wynik w uwadze („Kontrolnie: F41.1 w ICD-10 to…"). To wskazówka dla lekarza, **nie potwierdzenie** — ICD-10-CM to amerykańska modyfikacja i nie każdy jej kod istnieje w wersji WHO.
+
+## Model i koszty
+
+Domyślnie **`gemini-2.5-pro`** z budżetem myślenia **8192**. Przeszliśmy na niego z Flasha, bo przy długiej wizycie Flash mylił objawy aktualne z tymi, którym pacjent zaprzeczył albo które ustąpiły.
+
+Trzy pokrętła zmieniasz w sekretach, bez ruszania kodu (wymagają restartu aplikacji):
+
+| Zmienna | Domyślnie | Do czego |
+|---|---|---|
+| `GEMINI_MODEL` | `gemini-2.5-pro` | Zmiana modelu. Nieznany model jest wyceniany najdroższą znaną stawką i oznaczany w panelu. |
+| `GEMINI_THINKING_BUDGET` | `8192` | Tyle wynosi domyślna wartość Google dla 2.5 Pro. Niżej = taniej i gorzej; `-1` = model decyduje sam, ale koszt przestaje być przewidywalny. Pro nie umie wyłączyć myślenia — wartości poniżej 128 są podnoszone do 128. |
+| `FEW_SHOT_LIMIT` | `3` | Ile zatwierdzonych notatek trafia do promptu jako wzorzec stylu. `0` je wyłącza — użyj, gdyby model zaczął przenosić treść ze starych wizyt do nowej notatki. |
+
+Orientacyjny koszt wizyty 45-minutowej (~86 tys. tokenów audio): **2.5 Flash ≈ $0,10**, **2.5 Pro z myśleniem 8192 ≈ $0,23**. Tokeny myślenia są rozliczane jak wyjście, więc to one, a nie audio, odpowiadają za różnicę.
+
+⚠️ **Stawki w `src/pricing.py` pochodzą ze źródeł wtórnych i wymagają potwierdzenia** w konsoli Google Cloud. Cała tabela do poprawienia siedzi w jednym bloku na górze pliku; po sprawdzeniu ustaw tam `PRICES_ARE_PROVISIONAL = False`, żeby zniknęła informacja w panelu.
+
+⚠️ **Modele Pro mają podwójną stawkę powyżej 200 tys. tokenów promptu** — to około 1 h 44 min nagrania. Aplikacja obsługuje ten próg, ale warto o nim wiedzieć, planując długość wizyt.
 
 ## Panel właściciela (koszty i statystyki)
 

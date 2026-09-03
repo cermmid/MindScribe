@@ -205,6 +205,18 @@ if "current_note" in st.session_state:
         "Objawy (jeden w linii)",
         value="\n".join(note_data.get("objawy", [])),
         height=120,
+        help="Wyłącznie objawy obecne u pacjenta teraz.",
+    )
+
+    objawy_nieobecne_text = st.text_area(
+        "Objawy nieobecne (jeden w linii)",
+        value="\n".join(note_data.get("objawy_nieobecne") or []),
+        height=100,
+        help=(
+            "Objawy, którym pacjent zaprzeczył, oraz takie, które ustąpiły — "
+            "na przykład: myśli rezygnacyjne - neguje. Udokumentowany negatyw "
+            "ma wartość kliniczną, dlatego jest osobną rubryką, a nie brakiem wpisu."
+        ),
     )
 
     st.markdown(f"**Proponowane rozpoznania — {' + '.join(klasyfikacje)}**")
@@ -340,6 +352,7 @@ if "current_note" in st.session_state:
                 ryzyko_samobojcze_opis=ryzyko_opis,
                 status_psychiczny=status_psychiczny,
                 objawy=split_lines(objawy_text),
+                objawy_nieobecne=split_lines(objawy_nieobecne_text),
                 kody_icd=edited_icd.to_dict("records"),
                 zalecenia_terapeuty=split_lines(zalecenia_text),
                 zalecenia_proponowane=split_lines(propozycje_text),

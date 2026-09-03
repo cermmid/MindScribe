@@ -29,8 +29,16 @@ from src.db import (  # noqa: E402
     admin_visit_durations,
     init_db,
 )
+from src.config import GEMINI_MODEL  # noqa: E402
 from src.nbp import get_usd_pln_rate  # noqa: E402
-from src.pricing import estimate_audio_seconds, format_duration, usd_to_pln  # noqa: E402
+from src.pricing import (  # noqa: E402
+    PRICES_ARE_PROVISIONAL,
+    PRICES_CHECKED_ON,
+    estimate_audio_seconds,
+    format_duration,
+    is_priced,
+    usd_to_pln,
+)
 
 st.set_page_config(page_title="MindScribe — panel właściciela", page_icon="📊", layout="wide")
 
@@ -108,8 +116,34 @@ avg_cost = total_cost_pln / len(visits) if visits else 0.0
 st.caption(
     f"Średni koszt wizyty: **{avg_cost:.4f} zł**. "
     f"Kurs USD/PLN {usd_pln:.4f} ({rate_source}). "
-    "Koszt to szacunek wg stawek z `src/pricing.py` — realny rachunek jest w Google Cloud Billing."
+    f"Model: `{GEMINI_MODEL}`. Stawki z `src/pricing.py`, sprawdzone {PRICES_CHECKED_ON} — "
+    "realny rachunek jest w Google Cloud Billing."
 )
+
+# Cennik ustalono ze źródeł wtórnych; dopóki nikt go nie potwierdził w konsoli,
+# kwoty powyżej trzeba czytać jako orientacyjne.
+if PRICES_ARE_PROVISIONAL:
+    st.info(
+        "ℹ️ Stawki modeli nie zostały jeszcze potwierdzone w konsoli Google Cloud. "
+        "Po sprawdzeniu popraw tabelę na górze `src/pricing.py` i zdejmij tę flagę."
+    )
+
+# Nieznany model wyceniamy najdroższą znaną stawką — lepiej pokazać kwotę za wysoką
+# i ją poprawić niż zaniżoną, która zniknęłaby z sumy bez śladu.
+_unpriced = [v for v in visits if v.get("pricing_known") is False]
+if _unpriced:
+    _models = sorted({(v.get("gemini_model") or "?") for v in _unpriced})
+    st.warning(
+        f"⚠️ {len(_unpriced)} z {len(visits)} wizyt wyceniono **stawką zastępczą** — nie znamy "
+        f"cennika modelu: {', '.join(f'`{m}`' for m in _models)}. Podane kwoty to **górne "
+        "oszacowanie**. Dopisz stawki do `MODEL_PRICING_USD_PER_1M` w `src/pricing.py`."
+    )
+elif not is_priced(GEMINI_MODEL):
+    st.warning(
+        f"⚠️ Aplikacja jest ustawiona na `{GEMINI_MODEL}`, dla którego **nie mamy stawek**. "
+        "Kolejne wizyty będą wyceniane najdroższą znaną stawką, aż dopiszesz cennik "
+        "do `src/pricing.py`."
+    )
 
 if _estimated_count:
     st.warning(
