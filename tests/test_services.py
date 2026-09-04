@@ -23,10 +23,13 @@ from src.formatting import (
 )
 from src.pricing import estimate_audio_seconds, format_duration
 from src.prompts import SYSTEM_PROMPT, build_user_prompt
+from src.schemas import VerifiedICDCode
 from src.services import (
     build_corrected_note,
     clean_icd_rows,
+    count_distinct_diagnoses,
     derive_audio_suffix,
+    normalize_principal_diagnosis,
     resolve_note_version,
     split_lines,
 )
@@ -604,8 +607,12 @@ class TestGroupCodesByClassification:
         assert "ROZPOZNANIA (ICD-10)" in text
         assert "ROZPOZNANIA (DSM-5)" in text
         # tylko DSM-5 jest niepotwierdzony
-        assert "300.02 — GAD [DO WERYFIKACJI]" in text
-        assert "F41.1 — Lęk\n" in text
+        assert "300.02 — GAD" in text
+        assert "[NIEPOTWIERDZONY]" in text.split("ROZPOZNANIA (DSM-5)")[1]
+        # ICD-10 ma `zweryfikowany: True`, więc trafia w gałąź zgodności ze starymi notatkami
+        icd10_block = text.split("ROZPOZNANIA (ICD-10)")[1].split("ROZPOZNANIA (DSM-5)")[0]
+        assert "F41.1 — Lęk" in icd10_block
+        assert "[POTWIERDZONY]" in icd10_block
 
     def test_legacy_note_has_no_audio_warning(self):
         """Stare notatki nie mają pola jakości — nie wolno straszyć fałszywym alarmem."""
@@ -668,3 +675,135 @@ class TestResolveNoteVersion:
         resolved = resolve_note_version({})
         assert resolved.note is None
         assert resolved.source_json is None
+
+
+class TestPrincipalDiagnosis:
+    """Rozpoznanie zasadnicze to jedna z niewielu rzeczy, które trafiają do dokumentacji."""
+
+    def _code(self, system, desc, *, glowne=False):
+        return VerifiedICDCode(
+            klasyfikacja=system, code="X", description=desc, rozpoznanie_glowne=glowne
+        )
+
+    def test_keeps_only_the_first_marked_principal(self):
+        codes = normalize_principal_diagnosis(
+            [
+                self._code("ICD-10", "depresja", glowne=True),
+                self._code("ICD-10", "bezsenność", glowne=True),
+            ]
+        )
+        assert [c.rozpoznanie_glowne for c in codes] == [True, False]
+
+    def test_promotes_the_first_when_none_marked(self):
+        """Model porządkuje rozpoznania od najważniejszego, więc pierwsze jest głównym."""
+        codes = normalize_principal_diagnosis(
+            [self._code("ICD-10", "depresja"), self._code("ICD-10", "bezsenność")]
+        )
+        assert [c.rozpoznanie_glowne for c in codes] == [True, False]
+
+    def test_each_classification_has_its_own_principal(self):
+        """ICD-10 i ICD-11 opisują ten sam obraz osobno — rola nie przecieka między nimi."""
+        codes = normalize_principal_diagnosis(
+            [
+                self._code("ICD-10", "depresja", glowne=True),
+                self._code("ICD-10", "bezsenność"),
+                self._code("ICD-11", "depresja"),
+                self._code("ICD-11", "bezsenność"),
+            ]
+        )
+        by_system = {}
+        for c in codes:
+            by_system.setdefault(c.klasyfikacja, []).append(c.rozpoznanie_glowne)
+        assert by_system == {"ICD-10": [True, False], "ICD-11": [True, False]}
+
+    def test_survives_the_editor_round_trip(self):
+        """Bez tego zaznaczenie „Główne" w tabeli znikałoby przy zatwierdzaniu."""
+        rows = [
+            {
+                "klasyfikacja": "ICD-10",
+                "code": "F32.1",
+                "description": "Epizod depresyjny",
+                "rozpoznanie_glowne": True,
+                "confidence": 0.8,
+            },
+            {
+                "klasyfikacja": "ICD-10",
+                "code": "F51.0",
+                "description": "Bezsenność",
+                "rozpoznanie_glowne": False,
+                "confidence": 0.6,
+            },
+        ]
+        cleaned = clean_icd_rows(rows)
+        assert [c.rozpoznanie_glowne for c in cleaned] == [True, False]
+
+
+class TestDistinctDiagnosisCount:
+    """Limit dotyczy różnych rozpoznań, nie wierszy — przy trzech klasyfikacjach to nie to samo."""
+
+    def test_same_diagnosis_across_classifications_counts_once(self):
+        codes = [
+            {"klasyfikacja": "ICD-10", "description": "Epizod depresyjny"},
+            {"klasyfikacja": "ICD-11", "description": "Epizod depresyjny"},
+            {"klasyfikacja": "DSM-5", "description": "Epizod depresyjny"},
+        ]
+        assert count_distinct_diagnoses(codes) == 1
+
+    def test_counts_distinct_names(self):
+        codes = [
+            {"description": "Epizod depresyjny"},
+            {"description": "epizod depresyjny  "},
+            {"description": "Bezsenność"},
+        ]
+        assert count_distinct_diagnoses(codes) == 2
+
+    def test_ignores_blank_rows(self):
+        assert count_distinct_diagnoses([{"description": ""}, {"description": "  "}]) == 0
+
+
+class TestCopyableTextCompleteness:
+    """Ten tekst specjalista wkleja do pliku — ma zawierać wszystko z ekranu i nic ponadto."""
+
+    def _note(self):
+        return {
+            "ryzyko_samobojcze": "NIEOBECNE",
+            "klasyfikacje": ["ICD-11"],
+            "kody_icd": [
+                {
+                    "klasyfikacja": "ICD-11",
+                    "code": "6A70.1",
+                    "description": "Epizod depresyjny umiarkowany",
+                    "oficjalna_nazwa": "Single episode depressive disorder, moderate",
+                    "weryfikacja": "POTWIERDZONY",
+                    "rozpoznanie_glowne": True,
+                    "confidence": 0.8,
+                    "uwaga": "odpowiedź rejestru — release/11/mms/search: HTTP 404",
+                }
+            ],
+        }
+
+    def test_includes_role_state_official_name_and_confidence(self):
+        text = note_to_text(self._note(), title="Wizyta #1")
+        assert "[GŁÓWNE]" in text
+        assert "[POTWIERDZONY]" in text
+        assert "wg rejestru WHO: Single episode depressive disorder, moderate" in text
+        assert "pewność 0.80" in text
+
+    def test_excludes_registry_diagnostics(self):
+        """`uwaga` niesie diagnostykę HTTP — to komunikat dla ekranu, nie dla dokumentacji."""
+        text = note_to_text(self._note(), title="Wizyta #1")
+        assert "HTTP 404" not in text
+        assert "release/11" not in text
+
+    def test_excludes_transcript(self):
+        note = self._note() | {"raw_transcript": "pacjent mówi o bezsenności"}
+        assert "pacjent mówi o bezsenności" not in note_to_text(note, title="W")
+
+    def test_marks_secondary_diagnosis(self):
+        note = self._note()
+        note["kody_icd"][0]["rozpoznanie_glowne"] = False
+        assert "[współistniejące]" in note_to_text(note, title="W")
+
+    def test_date_is_included_when_given(self):
+        text = note_to_text(self._note(), title="W", created_at="2026-09-04T10:00:00")
+        assert "Data: 2026-09-04" in text

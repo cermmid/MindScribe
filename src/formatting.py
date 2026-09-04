@@ -190,15 +190,27 @@ def note_to_text(
                 line = f"- {code}" if code else "- (brak kodu)"
                 if desc:
                     line += f" — {desc}"
-                # Oznaczenie trafia też tutaj, bo ten tekst lekarz wkleja do dokumentacji.
+                # Rozpoznanie zasadnicze musi być widoczne w dokumentacji, a nie
+                # domyślane z kolejności wierszy.
+                line += " [GŁÓWNE]" if k.get("rozpoznanie_glowne") else " [współistniejące]"
+                # Wszystkie trzy stany, nie tylko brak potwierdzenia: „nie sprawdzano"
+                # to inna informacja niż „sprawdzono i potwierdzono".
+                stan = verification_state(k)
+                line += f" [{stan}]"
                 if needs_manual_check(k):
-                    line += " [DO WERYFIKACJI]"
                     any_unverified = True
+                if conf := k.get("confidence"):
+                    line += f" (pewność {float(conf):.2f})"
                 lines.append(line)
+                # Oficjalne brzmienie z rejestru ujawnia rozjazd kodu ze znaczeniem —
+                # to ono wyszło przy QE80 opisanym jako zaburzenia snu.
+                if oficjalna := (k.get("oficjalna_nazwa") or "").strip():
+                    lines.append(f"    wg rejestru WHO: {oficjalna}")
             lines.append("")
         if any_unverified:
             lines.append(
-                "Pozycje [DO WERYFIKACJI] nie zostały potwierdzone w oficjalnym rejestrze."
+                "Pozycje [NIEPOTWIERDZONY] nie zostały potwierdzone w oficjalnym rejestrze. "
+                "[NIESPRAWDZANY] oznacza klasyfikację, której nie odpytujemy."
             )
             lines.append("")
 

@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from src.audio import looks_silent
-from src.db import DatabaseUnavailable
+from src.db import DatabaseUnavailable, get_visit
 from src.auth import current_doctor, current_user_id
 from src.formatting import (
     audio_quality_label,
@@ -17,6 +17,7 @@ from src.services import (
     VisitNotUpdated,
     approve_note,
     build_corrected_note,
+    count_distinct_diagnoses,
     create_visit_from_audio,
     derive_audio_suffix,
     load_few_shot_examples,
@@ -236,6 +237,16 @@ if "current_note" in st.session_state:
             "dobrane ani sprawdzone; uzupełnij je ręcznie w tabeli poniżej."
         )
 
+    # Reguła promptu jest mechanizmem, to jest siatka bezpieczeństwa. Nie ucinamy
+    # nadmiarowych rozpoznań w kodzie — ciche wyrzucenie treści medycznej byłoby
+    # gorsze niż pokazanie jej specjaliście do usunięcia.
+    _distinct = count_distinct_diagnoses(_codes)
+    if _distinct > 2:
+        st.warning(
+            f"⚠️ Asystent zaproponował **{_distinct} różne rozpoznania**. Notatka ma zawierać "
+            "jedno rozpoznanie główne i najwyżej jedno towarzyszące — usuń zbędne wiersze."
+        )
+
     _default_system = klasyfikacje[0]
     icd_df = pd.DataFrame(
         [
@@ -246,6 +257,7 @@ if "current_note" in st.session_state:
                 # Termin angielski jedzie przez edytor, bo to nim odpytujemy rejestr
                 # przy zatwierdzaniu. Zgubiony tutaj = brak potwierdzenia ICD-11.
                 "termin_wyszukiwania": k.get("termin_wyszukiwania", ""),
+                "rozpoznanie_glowne": bool(k.get("rozpoznanie_glowne")),
                 "confidence": k.get("confidence", 0.0),
                 "weryfikacja": verification_state(k),
                 "uwaga": (k.get("uwaga") or "").strip(),
@@ -258,6 +270,7 @@ if "current_note" in st.session_state:
                 "code": "",
                 "description": "",
                 "termin_wyszukiwania": "",
+                "rozpoznanie_glowne": True,
                 "confidence": 0.0,
                 "weryfikacja": "NIESPRAWDZANY",
                 "uwaga": "",
@@ -286,6 +299,14 @@ if "current_note" in st.session_state:
                 help=(
                     "Nazwa rozpoznania po angielsku — tym szukamy w rejestrze WHO, bo polskich "
                     "nazw nie zna. Popraw ją, jeśli kod ICD-11 nie chce się potwierdzić."
+                ),
+            ),
+            "rozpoznanie_glowne": st.column_config.CheckboxColumn(
+                "Główne",
+                help=(
+                    "Rozpoznanie zasadnicze — to, które najlepiej tłumaczy obraz kliniczny. "
+                    "Dokładnie jedno w każdej klasyfikacji; jeśli zaznaczysz kilka, "
+                    "zostanie pierwsze."
                 ),
             ),
             "confidence": st.column_config.NumberColumn(
@@ -377,6 +398,10 @@ if "current_note" in st.session_state:
 
         st.session_state["approved_note"] = corrected.model_dump()
         st.session_state["approved_visit_id"] = st.session_state["current_visit_id"]
+        # Data z rekordu wizyty, nie z zegara: nagranie bywa wgrywane później niż
+        # odbyta wizyta, więc „dzisiaj" bywa nieprawdą w dokumentacji.
+        _record = get_visit(st.session_state["current_visit_id"], doctor_id=current_user_id())
+        st.session_state["approved_visit_created_at"] = (_record or {}).get("created_at")
         st.session_state["approved_visit_type"] = visit_type
         st.success(
             f"Wizyta #{st.session_state['current_visit_id']} zatwierdzona. "
@@ -400,6 +425,7 @@ if "approved_note" in st.session_state:
         approved,
         title=f"Wizyta #{st.session_state.get('approved_visit_id', '')}",
         visit_type=a_type,
+        created_at=st.session_state.get("approved_visit_created_at"),
         doctor_name=current_doctor(),
     )
     copy_button(note_text, key="copy_new")

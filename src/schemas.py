@@ -51,6 +51,15 @@ class ICDCode(BaseModel):
             "rejestr WHO nie ma polskich tłumaczeń, więc bez tego pola nie znajdziemy kodu."
         ),
     )
+    rozpoznanie_glowne: bool = Field(
+        default=False,
+        description=(
+            "Czy to jest rozpoznanie GŁÓWNE — to, które najlepiej tłumaczy obraz kliniczny. "
+            "Dokładnie JEDEN wpis w każdej klasyfikacji ma mieć tu true; rozpoznanie "
+            "towarzyszące ma false. Gdy podajesz to samo rozpoznanie w kilku klasyfikacjach, "
+            "oznacz je jako główne w każdej z nich."
+        ),
+    )
     confidence: float = Field(
         ge=0.0, le=1.0, description="Twoja pewność co do samego ROZPOZNANIA (nie kodu), 0.0-1.0"
     )
@@ -79,6 +88,9 @@ class VerifiedICDCode(BaseModel):
     # przy zatwierdzaniu (gdzie sprawdzamy wszystko jeszcze raz) nie mamy już czym
     # szukać i lecimy polską nazwą, której rejestr WHO nie zna.
     termin_wyszukiwania: str = ""
+    # Rola rozpoznania. Jawne pole, a nie „pierwsze na liście": specjalista edytuje
+    # wiersze w tabeli, więc kolejność nie jest niczym chroniona.
+    rozpoznanie_glowne: bool = False
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     # Oficjalny tytuł z rejestru (po angielsku). Trzymamy go OBOK polskiej nazwy,
     # zamiast nią podmieniać: lekarz czyta po polsku, ale rozjazd znaczenia zostaje
@@ -180,8 +192,10 @@ class PsychiatricNoteDraft(_NoteBase):
     kody_icd: list[ICDCode] = Field(
         default_factory=list,
         description=(
-            "Proponowane rozpoznania w klasyfikacji wskazanej w poleceniu (ICD-10 albo ICD-11). "
-            "Podawaj wyłącznie rozpoznania uzasadnione obrazem klinicznym."
+            "Rozpoznania w klasyfikacjach wskazanych w poleceniu. Jedno rozpoznanie GŁÓWNE "
+            "i najwyżej jedno TOWARZYSZĄCE — nie listuj wszystkiego, co dałoby się obronić. "
+            "Gdy poproszono o kilka klasyfikacji, każde rozpoznanie powtórz osobnym wpisem "
+            "dla każdej z nich; to nadal jest jedno rozpoznanie, nie kilka."
         ),
     )
 

@@ -72,7 +72,10 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
                 code = k.get("code") or "—"
                 conf = k.get("confidence")
                 suffix = f" _(pewność rozpoznania {float(conf):.2f})_" if conf is not None else ""
-                st.markdown(f"- {mark} **{code}** — {k.get('description', '')}{suffix}")
+                rola = "**główne**" if k.get("rozpoznanie_glowne") else "współistniejące"
+                st.markdown(
+                    f"- {mark} **{code}** — {k.get('description', '')} · {rola}{suffix}"
+                )
                 if oficjalna := (k.get("oficjalna_nazwa") or "").strip():
                     st.caption(f"　↳ wg rejestru WHO: {oficjalna}")
                 if uwaga := (k.get("uwaga") or "").strip():
@@ -96,7 +99,7 @@ def render_note(note: dict[str, Any], *, visit_type: str | None = None) -> None:
             st.markdown(f"- {z}")
 
 
-def copy_button(text: str, *, label: str = "📋 Kopiuj notatkę", key: str = "copy") -> None:
+def copy_button(text: str, *, label: str = "📋 Skopiuj wszystko", key: str = "copy") -> None:
     """Przycisk kopiujący `text` do schowka. Działa w iframe Streamlit (fallback execCommand)."""
     payload = json.dumps(text)
     html = f"""

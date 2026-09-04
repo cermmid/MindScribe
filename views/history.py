@@ -61,10 +61,10 @@ with st.expander("📂 Pokaż szczegóły wizyty", expanded=False):
                 created_at=visit.get("created_at"),
                 doctor_name=visit.get("doctor_name"),
             )
-            copy_button(note_text, key=f"copy_hist_{selected_id}")
             with st.expander("📄 Pełny tekst (zaznacz i skopiuj ręcznie)", expanded=False):
                 st.text(note_text)
         else:
+            note_text = ""
             st.code(resolved.source_json or "_brak_")
 
         with st.expander("📄 Surowa transkrypcja", expanded=False):
@@ -76,3 +76,8 @@ with st.expander("📂 Pokaż szczegóły wizyty", expanded=False):
             if corrected:
                 st.caption("Wersja po korekcie:")
                 st.json(json.loads(corrected))
+
+        # Na samym dole, pod zwijanymi sekcjami — wcześniej przycisk siedział w środku
+        # bloku i trzeba było przewijać w górę, żeby go znaleźć.
+        if note_text:
+            copy_button(note_text, key=f"copy_hist_{selected_id}")

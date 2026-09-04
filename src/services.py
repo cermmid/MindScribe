@@ -96,6 +96,7 @@ def clean_icd_rows(
                 code=code,
                 description=description,
                 termin_wyszukiwania=str(row.get("termin_wyszukiwania") or "").strip(),
+                rozpoznanie_glowne=bool(row.get("rozpoznanie_glowne")),
                 confidence=confidence,
             )
         )
@@ -119,6 +120,46 @@ def sort_codes_by_classification(
     """
     rank = {name: index for index, name in enumerate(CLASSIFICATION_ORDER)}
     return sorted(codes, key=lambda code: rank.get(code.klasyfikacja, len(rank)))
+
+
+def normalize_principal_diagnosis(
+    codes: Iterable[VerifiedICDCode],
+) -> list[VerifiedICDCode]:
+    """W każdej klasyfikacji zostaw dokładnie jedno rozpoznanie główne.
+
+    Dwa główne albo żadne to notatka, która sama sobie przeczy — a rozpoznanie
+    główne jest tym, co trafia do dokumentacji jako rozpoznanie zasadnicze.
+    Zostaje pierwsze oznaczone; gdy model nie oznaczył żadnego, główne zostaje
+    pierwsze na liście, bo model porządkuje rozpoznania od najważniejszego.
+
+    Rola nie przecieka między klasyfikacjami: ICD-10 i ICD-11 opisują ten sam obraz
+    kliniczny osobno i każde ma mieć własne rozpoznanie główne.
+    """
+    codes = list(codes)
+    for system in {code.klasyfikacja for code in codes}:
+        group = [code for code in codes if code.klasyfikacja == system]
+        principal = next((c for c in group if c.rozpoznanie_glowne), group[0])
+        for code in group:
+            code.rozpoznanie_glowne = code is principal
+    return codes
+
+
+def count_distinct_diagnoses(codes: Iterable[Mapping[str, Any]] | Iterable[Any]) -> int:
+    """Ile RÓŻNYCH rozpoznań, a nie wierszy.
+
+    Przy kilku klasyfikacjach to samo rozpoznanie występuje raz na klasyfikację,
+    więc liczenie wierszy odpowiadałoby na inne pytanie niż zadane.
+    """
+    names = set()
+    for code in codes:
+        raw = (
+            code.get("description")
+            if isinstance(code, Mapping)
+            else getattr(code, "description", "")
+        )
+        if name := (raw or "").strip().lower():
+            names.add(name)
+    return len(names)
 
 
 def registry_is_configured() -> bool:
@@ -211,6 +252,8 @@ def verify_icd_codes(
                     klasyfikacja=system,
                     code=proposed_code,
                     description=proposed_name,
+                    termin_wyszukiwania=search_term if search_term != proposed_name else "",
+                    rozpoznanie_glowne=item.rozpoznanie_glowne,
                     confidence=item.confidence,
                     weryfikacja=(
                         StanWeryfikacji.NIESPRAWDZANY
@@ -271,6 +314,7 @@ def verify_icd_codes(
                     # ze znaczeniem, jak przy QE80 opisanym jako zaburzenia snu.
                     description=proposed_name or match.title,
                     termin_wyszukiwania=search_term,
+                    rozpoznanie_glowne=item.rozpoznanie_glowne,
                     oficjalna_nazwa=match.title,
                     confidence=item.confidence,
                     weryfikacja=StanWeryfikacji.POTWIERDZONY,
@@ -292,6 +336,7 @@ def verify_icd_codes(
                     code=searched.code,
                     description=proposed_name or searched.title,
                     termin_wyszukiwania=search_term,
+                    rozpoznanie_glowne=item.rozpoznanie_glowne,
                     oficjalna_nazwa=searched.title,
                     confidence=item.confidence,
                     weryfikacja=StanWeryfikacji.POTWIERDZONY,
@@ -315,7 +360,7 @@ def verify_icd_codes(
                 )
             )
 
-    return sort_codes_by_classification(results)
+    return normalize_principal_diagnosis(sort_codes_by_classification(results))
 
 
 def _verify_dsm5(item: ICDCode, system: str, api_down_note: str) -> VerifiedICDCode:
@@ -351,6 +396,7 @@ def _unverified(
         code=(item.code or "").strip(),
         description=(item.description or "").strip(),
         termin_wyszukiwania=(getattr(item, "termin_wyszukiwania", "") or "").strip(),
+        rozpoznanie_glowne=bool(getattr(item, "rozpoznanie_glowne", False)),
         confidence=item.confidence,
         zweryfikowany=False,
         uwaga=note,

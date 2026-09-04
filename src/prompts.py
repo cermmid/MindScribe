@@ -27,6 +27,14 @@ Pozostałe zasady:
   Gdy nagranie jest niezrozumiałe, wpisz NIEOBECNE i zaznacz w opisie, że nagranie nie pozwoliło tego ocenić.
 - Rozpoznania podawaj wyłącznie wtedy, gdy obraz kliniczny je uzasadnia; dla każdej propozycji
   oszacuj realistyczną pewność.
+- KRYTYCZNE: podaj JEDNO rozpoznanie GŁÓWNE i NAJWYŻEJ JEDNO TOWARZYSZĄCE. Główne to takie,
+  które najlepiej tłumaczy całość obrazu klinicznego — oznacz je `rozpoznanie_glowne: true`.
+  Towarzyszące dodawaj tylko wtedy, gdy realnie zmienia postępowanie, i oznacz je `false`.
+  Liczy się liczba RÓŻNYCH rozpoznań, a nie liczba wpisów: gdy poproszono o kilka klasyfikacji,
+  to samo rozpoznanie powtarzasz osobnym wpisem dla każdej z nich i to nadal jest JEDNO
+  rozpoznanie. Objaw mieszczący się w rozpoznaniu głównym NIE jest osobnym rozpoznaniem —
+  bezsenność w epizodzie depresyjnym opisujesz w objawach, nie jako drugie rozpoznanie.
+  Notatka ma zawierać rozpoznanie robocze, a nie listę wszystkiego, co dałoby się obronić.
 - KRYTYCZNE: rozdzielaj objawy AKTUALNE od NIEOBECNYCH. Do `objawy` trafia tylko to, co
   pacjent ma teraz. Objaw, któremu pacjent ZAPRZECZYŁ ("nie mam myśli rezygnacyjnych"),
   oraz taki, który JUŻ USTĄPIŁ ("bezsenność minęła miesiąc temu"), idzie do
