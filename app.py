@@ -23,10 +23,15 @@ _ASSETS = Path(__file__).parent / "assets"
 
 st.set_page_config(page_title="MindScribe", page_icon="🧠", layout="wide")
 
-# Streamlit przygasza całą stronę przy każdym przeładowaniu skryptu, a przeładowanie
-# odpala każde kliknięcie — zaznaczenie klasyfikacji, zmiana pola w tabeli. Miga to
-# bez przerwy i przy dłuższym wypełnianiu notatki męczy wzrok. Wygaszamy przygaszanie;
-# o tym, że coś się liczy, i tak mówi pasek postępu przy generowaniu.
+# Dwie poprawki wyglądu. Obie celują w wewnętrzne atrybuty Streamlita
+# (`data-stale`, `data-testid`), więc przy jego aktualizacji trzeba je sprawdzić —
+# gdy selektor przestanie trafiać, nic się nie zepsuje, tylko wróci zachowanie domyślne.
+#
+# 1. Streamlit przygasza całą stronę przy każdym przeładowaniu skryptu, a przeładowanie
+#    odpala każde kliknięcie — zaznaczenie klasyfikacji, zmiana pola w tabeli. Miga to
+#    bez przerwy i przy dłuższym wypełnianiu notatki męczy wzrok. Wygaszamy przygaszanie;
+#    o tym, że coś się liczy, i tak mówi pasek postępu przy generowaniu.
+# 2. Logo powiększone ponad to, co pozwala `st.logo` — szczegóły przy regule niżej.
 st.markdown(
     """
     <style>
@@ -35,6 +40,23 @@ st.markdown(
         opacity: 1 !important;
         transition: none !important;
         filter: none !important;
+    }
+
+    /* Logo. `size="large"` w `st.logo` to najwięcej, co daje API — reszta musi
+       pójść stylem. Skalujemy SZEROKOŚCIĄ, nie wysokością: przy `height` i
+       `max-width` naraz przeglądarka potrafi zgnieść proporcje, a tak logo
+       zawsze mieści się w panelu i nigdy się nie zniekształca. */
+    [data-testid="stLogo"] {
+        width: 88% !important;
+        max-width: 220px !important;
+        height: auto !important;
+        max-height: none !important;
+        margin: 0.35rem 0 0.15rem 0;
+    }
+    /* Nagłówek panelu ma stałą wysokość i przyciąłby powiększone logo. */
+    [data-testid="stSidebarHeader"] {
+        height: auto !important;
+        padding-bottom: 0.5rem;
     }
     </style>
     """,
