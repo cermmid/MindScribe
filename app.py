@@ -10,10 +10,16 @@ dzieją się w JEDNYM miejscu, zanim uruchomi się jakikolwiek widok. Wcześniej
 wejście prosto pod adres podstrony omijało oba te kroki.
 """
 
+from pathlib import Path
+
 import streamlit as st
 
 from src.auth import require_login
 from src.db import DatabaseUnavailable, init_db
+
+# Ścieżka budowana od pliku, nie względna: `streamlit run` uruchomiony z innego
+# katalogu roboczego nie znalazłby grafiki, a objawem byłby brak logo bez błędu.
+_ASSETS = Path(__file__).parent / "assets"
 
 st.set_page_config(page_title="MindScribe", page_icon="🧠", layout="wide")
 
@@ -36,6 +42,16 @@ st.markdown(
 )
 
 require_login()
+
+# PO `require_login`, nie przed: logowanie kończy się `st.stop()`, a na ekranie
+# logowania nie ma jeszcze panelu bocznego — logo trafiłoby wtedy w lewy górny róg
+# obszaru głównego i wyglądało jak przypadek. `st.logo` renderuje się nad całą
+# zawartością panelu, więc ląduje też nad podpisem „Zalogowano" z `src/auth.py`.
+st.logo(
+    str(_ASSETS / "logo.svg"),
+    icon_image=str(_ASSETS / "logo-icon.svg"),
+    size="large",
+)
 
 try:
     init_db()

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Pełne logo MindScribe — znak plus napis. Pokazywane przez `st.logo`
+  nad nawigacją w panelu bocznym.
+
+  Kolory wpisane wprost, NIE przez `currentColor`: SVG ładowane jako obraz nie
+  dziedziczy koloru tekstu strony. Plik jest więc związany z ciemnym motywem
+  (.streamlit/config.toml, base = "dark"). Przy zmianie motywu na jasny biały
+  napis zniknie — wtedy trzeba tu podmienić #FAFAFA.
+
+  Napis złożony jest krojem systemowym, bo SVG ładowane jako obraz nie pobiera
+  fontów z sieci. Na maszynie bez Poppins/Montserrat złoży się kolejnym krojem
+  ze stosu i będzie odrobinę inny niż oryginał — jeśli to przeszkadza, podmień
+  ten plik na wersję z zamienionym tekstem na krzywe.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 292 64" width="292" height="64"
+     role="img" aria-label="MindScribe">
+  <circle cx="16" cy="32" r="7" fill="#4C8BF5"/>
+  <g fill="none" stroke="#FAFAFA" stroke-width="7" stroke-linecap="round">
+    <path d="M 23.98 16.99 A 17 17 0 0 1 23.98 47.01"/>
+    <path d="M 29.15 7.28 A 28 28 0 0 1 29.15 56.72"/>
+  </g>
+  <text x="64" y="45" fill="#FAFAFA" font-size="38" font-weight="700" letter-spacing="-0.5"
+        font-family="Poppins, Montserrat, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">MindScribe</text>
+</svg>
