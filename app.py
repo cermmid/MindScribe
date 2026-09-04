@@ -51,14 +51,25 @@ st.markdown(
          pod  = margin-bottom logo (1.2) + własny padding pozycji menu  ≈ 1.5rem
        Pozycja menu ma własne wypełnienie między krawędzią a tekstem, więc dolny
        margines jest o nie mniejszy — inaczej dół wyszedłby wizualnie większy.
-       Gdy trzeba to przestroić, wystarczy ruszyć `margin-bottom` niżej. */
+       Gdy trzeba to przestroić, wystarczy ruszyć `margin-bottom` niżej.
+
+       Selektor jest potrójny celowo: `stLogo` to nazwa, której Streamlit używa
+       dzisiaj, a `stSidebarHeader img` łapie logo niezależnie od tej nazwy —
+       w nagłówku panelu nie ma innego obrazka. Bez tego zapasowego trafienia
+       zmiana nazwy w Streamlicie cicho przywraca domyślny rozmiar. */
+    section[data-testid="stSidebar"] [data-testid="stLogo"],
+    [data-testid="stSidebarHeader"] img,
     [data-testid="stLogo"] {
         display: block;
-        width: 92% !important;
-        max-width: 240px !important;
+        /* Szerokość w pikselach, NIE w procentach. Procent liczy się od nagłówka
+           panelu, a ten nie jest pełnej szerokości — stąd logo wychodziło mniejsze,
+           niż zakładała reguła. `max-width` przy `height: auto` tylko zmniejsza
+           proporcjonalnie, więc nic się nie zniekształci. */
+        width: 220px !important;
+        max-width: 100% !important;
         height: auto !important;
         max-height: none !important;
-        margin: 0.9rem auto 1.2rem 0;
+        margin: 0.9rem auto 1.2rem 0 !important;
     }
     /* Nagłówek panelu ma stałą wysokość i przyciąłby powiększone logo. */
     [data-testid="stSidebarHeader"] {
