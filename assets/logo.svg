@@ -13,13 +13,13 @@
   ze stosu i będzie odrobinę inny niż oryginał — jeśli to przeszkadza, podmień
   ten plik na wersję z zamienionym tekstem na krzywe.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 292 64" width="292" height="64"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" width="320" height="64"
      role="img" aria-label="MindScribe">
   <circle cx="16" cy="32" r="7" fill="#4C8BF5"/>
   <g fill="none" stroke="#FAFAFA" stroke-width="7" stroke-linecap="round">
     <path d="M 23.98 16.99 A 17 17 0 0 1 23.98 47.01"/>
     <path d="M 29.15 7.28 A 28 28 0 0 1 29.15 56.72"/>
   </g>
-  <text x="64" y="45" fill="#FAFAFA" font-size="38" font-weight="700" letter-spacing="-0.5"
+  <text x="78" y="45.5" fill="#FAFAFA" font-size="40" font-weight="700" letter-spacing="-0.5"
         font-family="Poppins, Montserrat, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">MindScribe</text>
 </svg>

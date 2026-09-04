@@ -45,18 +45,22 @@ st.markdown(
     /* Logo. `size="large"` w `st.logo` to najwięcej, co daje API — reszta musi
        pójść stylem. Skalujemy SZEROKOŚCIĄ, nie wysokością: przy `height` i
        `max-width` naraz przeglądarka potrafi zgnieść proporcje, a tak logo
-       zawsze mieści się w panelu i nigdy się nie zniekształca. */
+       zawsze mieści się w panelu i nigdy się nie zniekształca.
+       Górny margines większy od dolnego — logo ma mieć powietrze nad sobą,
+       a do nawigacji przylegać bliżej, żeby czytało się jako jej nagłówek. */
     [data-testid="stLogo"] {
-        width: 88% !important;
-        max-width: 220px !important;
+        display: block;
+        width: 92% !important;
+        max-width: 240px !important;
         height: auto !important;
         max-height: none !important;
-        margin: 0.35rem 0 0.15rem 0;
+        margin: 0.9rem auto 0.2rem 0;
     }
     /* Nagłówek panelu ma stałą wysokość i przyciąłby powiększone logo. */
     [data-testid="stSidebarHeader"] {
         height: auto !important;
-        padding-bottom: 0.5rem;
+        padding-top: 0.6rem;
+        padding-bottom: 0.2rem;
     }
     </style>
     """,
