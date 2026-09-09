@@ -144,7 +144,13 @@ if st.button(
     st.session_state["current_note"] = created.note.model_dump()
     st.session_state["debug_prompt"] = created.debug_prompt
     st.session_state["current_usage"] = created.usage
-    st.success(f"Wizyta #{created.visit_id} zapisana jako draft.")
+    st.success(
+        f"Wizyta #{created.visit_id} zapisana jako draft. "
+        f"Gotowe w {created.timings.calosc:.0f} s."
+    )
+    # Rozbicie, a nie sama suma: gdy znów zrobi się wolno, od razu widać, który
+    # etap urósł. Kosztów specjalista nadal nie widzi — to jest czas, nie pieniądze.
+    st.caption(created.timings.summary())
 
 # Zużycie tokenów i koszt są dalej zapisywane do bazy, ale świadomie NIE pokazywane
 # lekarzowi — to dane biznesowe właściciela, widoczne w osobnym panelu (admin/app.py).
@@ -381,6 +387,9 @@ if "current_note" in st.session_state:
                 podsumowanie=podsumowanie,
                 klasyfikacje=klasyfikacje,
                 jakosc_nagrania=note_data.get("jakosc_nagrania", "DOBRA"),
+                # Wyniki z generowania — niezmienione wiersze nie muszą jeszcze raz
+                # jechać do rejestru WHO.
+                already_verified=get_icd_codes(note_data),
             )
         except Exception as e:
             st.error(f"Notatka nie przeszła walidacji: {e}")

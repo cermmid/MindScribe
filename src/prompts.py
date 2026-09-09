@@ -55,20 +55,30 @@ Pozostałe zasady:
 
 
 def build_few_shot_block(examples: list[dict]) -> str:
-    """examples: list of {raw_transcript: str, note_json: str} for last approved visits."""
+    """examples: list of {raw_transcript: str, note_json: str} for last approved visits.
+
+    **Transkrypcje NIE trafiają do promptu.** Te przykłady mają jeden cel: pokazać
+    modelowi styl pisania tej osoby — a styl siedzi w zatwierdzonej notatce, nie
+    w surowym zapisie rozmowy. Wklejanie transkrypcji kosztowało przy 20-minutowych
+    wizytach ~6 000 tokenów na przykład (przy trzech: ~18 000 na każde zapytanie),
+    wydłużało generowanie i było dokładnie tym kanałem, którym treść cudzej wizyty
+    mogła przeciec do nowej notatki. Klucz `raw_transcript` zostaje w sygnaturze,
+    bo tak zwraca go baza — po prostu go nie używamy.
+    """
     if not examples:
         return ""
 
     blocks = [
         "### PRZYKŁADY ZATWIERDZONYCH NOTATEK TEJ OSOBY\n"
-        "UWAGA: to są notatki z INNYCH, wcześniejszych wizyt. Służą wyłącznie jako wzorzec STYLU.\n"
-        "Nie przepisuj z nich żadnej treści do nowej notatki.\n"
+        "UWAGA: to są gotowe notatki z INNYCH, wcześniejszych wizyt. Pokazują wyłącznie\n"
+        "SPOSÓB PISANIA tej osoby — długość zdań, dobór słów, rozłożenie akcentów.\n"
+        "Nie są materiałem źródłowym: nie przepisuj z nich żadnej treści, żadnego objawu,\n"
+        "rozpoznania ani leku do nowej notatki.\n"
     ]
     for i, ex in enumerate(examples, 1):
         blocks.append(
-            f"--- PRZYKŁAD {i} (cudza wizyta, tylko styl) ---\n"
-            f"Transkrypcja:\n{ex['raw_transcript']}\n\n"
-            f"Zatwierdzona notatka (JSON):\n{ex['note_json']}\n"
+            f"--- PRZYKŁAD {i} (inna wizyta, tylko wzorzec stylu) ---\n"
+            f"{ex['note_json']}\n"
         )
     blocks.append("--- KONIEC PRZYKŁADÓW ---\n")
     return "\n".join(blocks)

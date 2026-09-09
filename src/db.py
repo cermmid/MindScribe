@@ -63,6 +63,9 @@ visits = sa.Table(
     sa.Column("estimated_cost_usd", sa.Numeric(14, 6), server_default="0"),
     sa.Column("prompt_audio_tokens", sa.BigInteger, server_default="0"),
     sa.Column("audio_duration_seconds", sa.Float),
+    # Ile trwało wygenerowanie notatki. Bez tej kolumny „trwa za długo" jest
+    # nierozstrzygalne — a to jedyna miara, po której widać, czy strojenie pomogło.
+    sa.Column("generation_seconds", sa.Float),
     # Model, który policzył tę wizytę, i czy znaliśmy jego cennik. Bez tego koszty
     # historyczne są nieprzypisywalne: po zmianie modelu nie da się odróżnić, które
     # wiersze wyceniono po którym cenniku, ani które są tylko górnym oszacowaniem.
@@ -204,6 +207,7 @@ def insert_visit(
     visit_type: str | None = None,
     usage: dict | None = None,
     audio_duration_seconds: float | None = None,
+    generation_seconds: float | None = None,
 ) -> int:
     usage = usage or {}
     stmt = (
@@ -228,6 +232,7 @@ def insert_visit(
                 usage.get("prompt_audio_tokens", 0) if usage.get("modality_known") else 0
             ),
             audio_duration_seconds=audio_duration_seconds,
+            generation_seconds=generation_seconds,
             gemini_model=usage.get("model") or None,
             pricing_known=bool(usage.get("pricing_known", True)),
         )
@@ -392,6 +397,7 @@ def admin_visit_durations() -> list[dict[str, Any]]:
         visits.c.visit_type,
         visits.c.status,
         visits.c.audio_duration_seconds,
+        visits.c.generation_seconds,
         visits.c.prompt_audio_tokens,
         visits.c.estimated_cost_usd,
         visits.c.gemini_model,

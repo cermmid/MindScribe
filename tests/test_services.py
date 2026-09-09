@@ -22,7 +22,7 @@ from src.formatting import (
     note_to_text,
 )
 from src.pricing import estimate_audio_seconds, format_duration
-from src.prompts import SYSTEM_PROMPT, build_user_prompt
+from src.prompts import SYSTEM_PROMPT, build_few_shot_block, build_user_prompt
 from src.schemas import VerifiedICDCode
 from src.services import (
     build_corrected_note,
@@ -31,6 +31,7 @@ from src.services import (
     derive_audio_suffix,
     normalize_principal_diagnosis,
     resolve_note_version,
+    reuse_verification,
     split_lines,
 )
 
@@ -807,3 +808,76 @@ class TestCopyableTextCompleteness:
     def test_date_is_included_when_given(self):
         text = note_to_text(self._note(), title="W", created_at="2026-09-04T10:00:00")
         assert "Data: 2026-09-04" in text
+
+
+class TestFewShotWithoutTranscripts:
+    """Przykłady uczą stylu, a styl jest w notatce — transkrypcja to tylko koszt."""
+
+    def _examples(self):
+        return [
+            {
+                "raw_transcript": "PACJENT: nie sypiam od tygodni, TAJNA TREŚĆ WIZYTY",
+                "note_json": '{"podsumowanie": "Wizyta kontrolna."}',
+            }
+        ]
+
+    def test_transcript_is_not_sent_to_the_model(self):
+        block = build_few_shot_block(self._examples())
+        assert "TAJNA TREŚĆ WIZYTY" not in block
+        assert "Transkrypcja" not in block
+
+    def test_note_is_still_sent(self):
+        assert "Wizyta kontrolna." in build_few_shot_block(self._examples())
+
+    def test_prompt_shrinks_substantially(self):
+        """Przy 20-minutowych wizytach to była większość tekstowej części promptu."""
+        long_examples = [
+            {"raw_transcript": "słowo " * 4000, "note_json": '{"podsumowanie": "x"}'}
+            for _ in range(3)
+        ]
+        assert len(build_few_shot_block(long_examples)) < 1000
+
+    def test_empty_list_produces_nothing(self):
+        assert build_few_shot_block([]) == ""
+
+
+class TestApprovalReusesVerification:
+    """Zatwierdzanie nie może odpytywać rejestru o wiersze, których nikt nie tknął."""
+
+    def _verified(self, code="F32.1", desc="Epizod depresyjny"):
+        return {
+            "klasyfikacja": "ICD-11",
+            "code": code,
+            "description": desc,
+            "weryfikacja": "POTWIERDZONY",
+            "oficjalna_nazwa": "Moderate depressive episode",
+            "zweryfikowany": True,
+            "uwaga": "",
+        }
+
+    def test_unchanged_row_is_not_rechecked(self):
+        rows = clean_icd_rows([dict(self._verified(), confidence=0.8)])
+        reused, to_check = reuse_verification(rows, [self._verified()])
+        assert to_check == []
+        assert reused[0].weryfikacja.value == "POTWIERDZONY"
+        assert reused[0].oficjalna_nazwa == "Moderate depressive episode"
+
+    def test_edited_code_goes_back_to_the_registry(self):
+        """Kod wpisany ręcznie musi przejść weryfikację — ta reguła zostaje."""
+        rows = clean_icd_rows([dict(self._verified(code="F41.1"), confidence=0.8)])
+        reused, to_check = reuse_verification(rows, [self._verified()])
+        assert reused == []
+        assert [c.code for c in to_check] == ["F41.1"]
+
+    def test_toggling_principal_does_not_discard_verification(self):
+        """Zaznaczenie „Główne" nie zmienia niczego, o co pytalibyśmy WHO."""
+        row = dict(self._verified(), confidence=0.8, rozpoznanie_glowne=True)
+        reused, to_check = reuse_verification(clean_icd_rows([row]), [self._verified()])
+        assert to_check == []
+        assert reused[0].rozpoznanie_glowne is True
+
+    def test_new_row_has_nothing_to_reuse(self):
+        rows = clean_icd_rows([{"klasyfikacja": "ICD-11", "code": "7A00", "description": "Bezsenność"}])
+        reused, to_check = reuse_verification(rows, [])
+        assert reused == []
+        assert len(to_check) == 1

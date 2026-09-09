@@ -106,11 +106,22 @@ _known = [d for d, _ in _durations if d]
 _estimated_count = sum(1 for d, est in _durations if d and est)
 total_cost_pln = usd_to_pln(sum(float(v["estimated_cost_usd"] or 0) for v in visits), usd_pln)
 
-c1, c2, c3, c4 = st.columns(4)
+# Czas generowania to miara, po której widać, czy aplikacja nadąża między wizytami.
+_gen = [float(v["generation_seconds"]) for v in visits if v.get("generation_seconds")]
+
+c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Specjalistów", len(users))
 c2.metric("Wizyt", len(visits))
 c3.metric("Łączny czas nagrań", format_duration(sum(_known)) if _known else "—")
 c4.metric("Koszt łącznie", f"{total_cost_pln:.2f} zł")
+c5.metric(
+    "Generowanie — mediana",
+    f"{sorted(_gen)[len(_gen) // 2]:.0f} s" if _gen else "—",
+    # Najdłuższy przypadek boli bardziej niż średnia: to on decyduje, czy notatka
+    # zdąży powstać przed następnym pacjentem.
+    delta=f"najdłużej {max(_gen):.0f} s" if _gen else None,
+    delta_color="off",
+)
 
 avg_cost = total_cost_pln / len(visits) if visits else 0.0
 st.caption(

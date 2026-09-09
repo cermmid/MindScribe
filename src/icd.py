@@ -31,7 +31,15 @@ ICD11_RELEASES = "release/11"
 FOUNDATION_SEARCH = "entity/search"
 ICD10_RELEASE = "release/10/2019"
 
-_TIMEOUT = 8
+# Pojedyncze zapytanie. Krótko, bo każde ma warianty zapasowe — czekanie ośmiu
+# sekund na odpowiedź, którą i tak zaraz spróbujemy zdobyć inaczej, niczego nie kupuje.
+_TIMEOUT = 4
+
+# Twardy budżet na CAŁĄ weryfikację jednej notatki. Rejestr jest wartością dodaną,
+# nie warunkiem powstania notatki — po przekroczeniu budżetu przestajemy pytać
+# i oznaczamy resztę jako niesprawdzoną. Bez tego każda awaria WHO jest awarią
+# gabinetu: przy 20-minutowej wizycie potrafiło to dołożyć minuty do czekania.
+VERIFY_BUDGET_SECONDS = 15.0
 _TAG_RE = re.compile(r"<[^>]+>")
 _RELEASE_RE = re.compile(r"/release/11/(\d{4}-\d{2})\b")
 _RELEASE_ID_RE = re.compile(r"\d{4}-\d{2}")
@@ -40,6 +48,27 @@ _ENTITY_ID_RE = re.compile(r"/(\d+)/?$")
 # Ile encji bez kodu próbujemy jeszcze rozwiązać przez linearyzację. Każda to osobne
 # zapytanie, więc trzymamy krótko — pierwsze trafienie i tak jest tym, którego używamy.
 _RESOLVE_LIMIT = 5
+
+
+class Deadline:
+    """Wspólny zegar dla jednej serii odpytań rejestru.
+
+    Trzymany jawnie, a nie globalnie: weryfikacja jednej notatki ma własny budżet,
+    a testy mogą go ustawić na zero i sprawdzić zachowanie po jego wyczerpaniu.
+    """
+
+    def __init__(self, seconds: float = VERIFY_BUDGET_SECONDS) -> None:
+        self._until = time.monotonic() + max(0.0, float(seconds))
+
+    def expired(self) -> bool:
+        return time.monotonic() >= self._until
+
+    def remaining(self) -> float:
+        return max(0.0, self._until - time.monotonic())
+
+
+class BudgetExhausted(RuntimeError):
+    """Budżet czasu na rejestr się wyczerpał — reszta kodów zostaje niesprawdzona."""
 
 
 @dataclass(frozen=True)
@@ -165,9 +194,51 @@ def _api_error(payload: dict | None) -> str:
     return str(payload.get("errorMessage") or "nieokreślony błąd wyszukiwarki WHO")
 
 
+# Wyniki z rejestru w obrębie procesu. Rozpoznania powtarzają się między wizytami —
+# „epizod depresyjny umiarkowany" odpytywał WHO od zera przy każdej notatce.
+# Zwykły słownik, nie `lru_cache`: klucz zawiera język i klasyfikację, a testy
+# muszą móc go wyczyścić bez sięgania do wnętrzności dekoratora.
+_result_cache: dict[tuple, object] = {}
+_CACHE_LIMIT = 512
+
+
+def clear_cache() -> None:
+    """Wyczyść zapamiętane odpowiedzi rejestru (używane w testach)."""
+    _result_cache.clear()
+    _release_cache.update(id="", resolved=False)
+
+
+def _cached(key: tuple, produce):
+    """Zwróć wynik z cache albo policz go i zapamiętaj.
+
+    Zapamiętujemy też PUSTY wynik: „rejestr tego nie zna" jest odpowiedzią tak samo
+    wartą zapamiętania jak trafienie, a bez tego najdroższy przypadek — pełna
+    kaskada wariantów zakończona niczym — powtarzałby się przy każdej wizycie.
+    """
+    if key in _result_cache:
+        return _result_cache[key]
+    value = produce()
+    if len(_result_cache) >= _CACHE_LIMIT:
+        _result_cache.clear()
+    _result_cache[key] = value
+    return value
+
+
+def _check(deadline: "Deadline | None") -> None:
+    """Przerwij, gdy budżet czasu na rejestr się wyczerpał."""
+    if deadline is not None and deadline.expired():
+        raise BudgetExhausted(
+            "Przekroczono budżet czasu na odpytanie rejestru WHO — "
+            "pozostałe rozpoznania zostają niesprawdzone."
+        )
+
+
 # --- Wydanie ICD-11 ------------------------------------------------------------
 
-_release_cache: dict[str, str] = {"id": ""}
+# `resolved` odróżnia „jeszcze nie pytaliśmy" od „pytaliśmy i się nie udało".
+# Bez tego rozróżnienia nieudane ustalenie wydania powtarzało dwa zapytania przy
+# każdym wyszukiwaniu — a przy notatce z kilkoma rozpoznaniami to już dziesiątki.
+_release_cache: dict[str, object] = {"id": "", "resolved": False}
 
 
 def _release_id() -> str:
@@ -177,9 +248,10 @@ def _release_id() -> str:
     Numer bierzemy z korzenia linearyzacji, a gdy tamten adres zawiedzie — z listy
     wydań, która zwraca je od najnowszego. Koszt to jedno zapytanie na proces.
     """
-    if _release_cache["id"]:
-        return _release_cache["id"]
+    if _release_cache["resolved"]:
+        return str(_release_cache["id"])
 
+    _release_cache["resolved"] = True
     for path in (ICD11_RELEASES, ICD11_LINEARIZATION):
         try:
             payload = _get(path, language="en") or {}
@@ -189,6 +261,10 @@ def _release_id() -> str:
             _release_cache["id"] = release
             return release
     return ""
+
+
+def _reset_release_cache() -> None:
+    _release_cache.update(id="", resolved=False)
 
 
 def _release_from_payload(payload: dict) -> str:
@@ -237,11 +313,14 @@ def _icd11_search_paths() -> list[str]:
 # --- Wyszukiwanie i weryfikacja ------------------------------------------------
 
 
-def _linearization_entity(uri: str, *, language: str) -> IcdMatch | None:
+def _linearization_entity(
+    uri: str, *, language: str, deadline: Deadline | None = None
+) -> IcdMatch | None:
     """Kod i tytuł encji z linearyzacji MMS, po jej identyfikatorze albo pełnym URI."""
     found = _ENTITY_ID_RE.search(uri or "")
     if not found:
         return None
+    _check(deadline)
     try:
         payload = _get(f"{_mms_prefix()}/{found.group(1)}", language=language)
     except IcdUnavailable:
@@ -251,7 +330,9 @@ def _linearization_entity(uri: str, *, language: str) -> IcdMatch | None:
     return IcdMatch(code=code, title=title) if code and title else None
 
 
-def _matches_from(entities: list[dict], *, language: str) -> list[IcdMatch]:
+def _matches_from(
+    entities: list[dict], *, language: str, deadline: Deadline | None = None
+) -> list[IcdMatch]:
     """Zamień wynik wyszukiwarki na trafienia z kodem.
 
     Encje z wyszukiwarki fundacji (i część wyników linearyzacji: rozdziały, bloki)
@@ -270,8 +351,10 @@ def _matches_from(entities: list[dict], *, language: str) -> list[IcdMatch]:
     resolved: list[IcdMatch] = []
     for entity in entities[:_RESOLVE_LIMIT]:
         uri = str(entity.get("id") or entity.get("@id") or entity.get("stemId") or "")
-        if hit := _linearization_entity(uri, language=language):
-            resolved.append(hit)
+        if hit := _linearization_entity(uri, language=language, deadline=deadline):
+            # Pierwsze rozwiązane trafienie i tak jest tym, którego używamy —
+            # dopytywanie o pozostałe cztery to cztery zapytania w błoto.
+            return [hit]
     return resolved
 
 
@@ -309,6 +392,7 @@ def search(
     icd11: bool = True,
     language: str = "pl",
     trace: list[dict] | None = None,
+    deadline: Deadline | None = None,
 ) -> list[IcdMatch]:
     """Znajdź rozpoznania pasujące do frazy. Pusta lista, gdy nic nie pasuje.
 
@@ -323,8 +407,28 @@ def search(
     if not term.strip() or not icd11:
         return []
 
+    # Cache przed czymkolwiek innym: trafienie oznacza zero zapytań do WHO.
+    # `trace` omija cache, bo skrypt diagnostyczny ma pokazywać prawdziwe próby.
+    if trace is None:
+        return list(
+            _cached(
+                ("search", term.strip().lower(), language),
+                lambda: _search_uncached(term, language=language, trace=None, deadline=deadline),
+            )
+        )
+    return _search_uncached(term, language=language, trace=trace, deadline=deadline)
+
+
+def _search_uncached(
+    term: str,
+    *,
+    language: str,
+    trace: list[dict] | None,
+    deadline: Deadline | None,
+) -> list[IcdMatch]:
     # Awaria tokenu to realna niedostępność rejestru, a nie „brak trafień" —
     # ma polecieć wyżej, zanim zaczniemy przebierać w wariantach zapytania.
+    _check(deadline)
     _access_token()
 
     last_error: IcdUnavailable | None = None
@@ -339,6 +443,7 @@ def search(
     for lang in _language_order(language):
         for path in _icd11_search_paths():
             for flexi in ("false", "true"):
+                _check(deadline)
                 params = {"q": term, "flatResults": "true", "useFlexisearch": flexi}
                 try:
                     status, payload = _request(path, language=lang, params=params)
@@ -357,7 +462,7 @@ def search(
 
                 answered = True
                 entities = (payload or {}).get("destinationEntities") or []
-                matches = _matches_from(entities, language=lang)
+                matches = _matches_from(entities, language=lang, deadline=deadline)
                 _note(
                     trace,
                     path=path,
@@ -370,6 +475,11 @@ def search(
                 )
                 if matches:
                     return matches
+                if entities:
+                    # Adres odpowiedział i coś znalazł, tylko nie dało się dobrać kodu.
+                    # To problem rozwiązywania encji, nie zapytania — powtarzanie go
+                    # w drugim trybie pod tym samym adresem nic nie zmieni.
+                    break
 
     # Żaden wariant nie dostał poprawnej odpowiedzi — to awaria, nie brak wyniku.
     # Rozróżnienie jest istotne: lekarz ma zobaczyć „rejestr nie odpowiada jak trzeba",
@@ -389,30 +499,48 @@ def search(
     return []
 
 
-def lookup_code(code: str, *, icd11: bool = True, language: str = "pl") -> IcdMatch | None:
+def lookup_code(
+    code: str,
+    *,
+    icd11: bool = True,
+    language: str = "pl",
+    deadline: Deadline | None = None,
+) -> IcdMatch | None:
     """Oficjalny tytuł dla podanego kodu. `None`, gdy kod nie istnieje w klasyfikacji."""
     code = (code or "").strip()
     if not code:
         return None
+    return _cached(
+        ("code", code.upper(), icd11, language),
+        lambda: _lookup_code_uncached(code, icd11=icd11, language=language, deadline=deadline),
+    )
 
+
+def _lookup_code_uncached(
+    code: str, *, icd11: bool, language: str, deadline: Deadline | None
+) -> IcdMatch | None:
     if icd11:
         # `codeinfo` to zapytanie wprost o kod — pewniejsze niż szukanie po jego
         # napisie, bo wyszukiwarka może zwrócić coś podobnego zamiast dokładnego wpisu.
         for lang in _language_order(language):
+            _check(deadline)
             try:
                 info = _get(f"{_mms_prefix()}/codeinfo/{code}", language=lang)
             except IcdUnavailable:
                 info = None
             if info:
-                hit = _linearization_entity(str(info.get("stemId") or ""), language=lang)
+                hit = _linearization_entity(
+                    str(info.get("stemId") or ""), language=lang, deadline=deadline
+                )
                 if hit and hit.code.upper() == code.upper():
                     return hit
-        for candidate in search(code, icd11=True, language=language):
+        for candidate in search(code, icd11=True, language=language, deadline=deadline):
             if candidate.code.upper() == code.upper():
                 return candidate
         return None
 
     for lang in _language_order(language):
+        _check(deadline)
         payload = _get(f"{ICD10_RELEASE}/{code}", language=lang)
         if payload:
             title = _title_of(payload)

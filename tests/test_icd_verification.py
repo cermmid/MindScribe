@@ -24,14 +24,14 @@ def fake_who(monkeypatch):
         codes, terms = codes or {}, terms or {}
         counters = {"lookup": 0, "search": 0}
 
-        def lookup_code(code, *, icd11=True, language="pl"):
+        def lookup_code(code, *, icd11=True, language="pl", deadline=None):
             counters["lookup"] += 1
             if fail:
                 raise icd.IcdUnavailable("brak sieci")
             title = codes.get((code or "").upper())
             return icd.IcdMatch(code=code.upper(), title=title) if title else None
 
-        def search(term, *, icd11=True, language="pl", trace=None):
+        def search(term, *, icd11=True, language="pl", trace=None, deadline=None):
             counters["search"] += 1
             if fail:
                 raise icd.IcdUnavailable("brak sieci")
@@ -40,6 +40,7 @@ def fake_who(monkeypatch):
 
         monkeypatch.setattr(icd, "lookup_code", lookup_code)
         monkeypatch.setattr(icd, "search", search)
+        icd.clear_cache()
         return counters
 
     return _install
@@ -511,6 +512,9 @@ def who_endpoint(monkeypatch):
         monkeypatch.setattr(icd, "_access_token", lambda: "token-testowy")
         monkeypatch.setattr(icd, "_request", fake_request)
         monkeypatch.setitem(icd._release_cache, "id", "")
+        # Cache wyników żyje w module, więc bez tego wynik z poprzedniego testu
+        # udawałby odpowiedź rejestru w następnym.
+        icd.clear_cache()
         return calls
 
     return _install
@@ -625,6 +629,7 @@ class TestIcd11Search:
         monkeypatch.setattr(icd, "_access_token", lambda: "token-testowy")
         monkeypatch.setattr(icd, "_get", boom)
         monkeypatch.setitem(icd._release_cache, "id", "")
+        icd.clear_cache()
         with pytest.raises(icd.IcdUnavailable):
             icd.search("anxiety", language="en")
 
@@ -748,3 +753,111 @@ class TestApiErrorPayload:
 
     def test_normal_payload_has_no_error(self):
         assert icd._api_error({"destinationEntities": []}) == ""
+
+
+class TestRequestBudget:
+    """Rejestr nie może zatrzymać specjalisty — ani liczbą zapytań, ani czasem.
+
+    Punkt wyjścia: przy 20-minutowych wizytach notatka powstawała ponad pięć minut,
+    a rachunek z kodu dawał ~72 kolejne zapytania HTTP do WHO na jedną notatkę.
+    """
+
+    def _codes(self):
+        return [
+            ICDCode(
+                klasyfikacja="ICD-11",
+                code="6A70.1",
+                description="Epizod depresyjny umiarkowany",
+                termin_wyszukiwania="Moderate depressive episode",
+                confidence=0.8,
+            ),
+            ICDCode(
+                klasyfikacja="ICD-11",
+                code="7A00",
+                description="Bezsenność przewlekła",
+                termin_wyszukiwania="Chronic insomnia",
+                confidence=0.6,
+            ),
+        ]
+
+    def test_worst_case_request_count_is_bounded(self, who_endpoint):
+        """Rejestr odpowiada 404 na wszystko — najgorszy przypadek, dawniej najdroższy."""
+        calls = who_endpoint({})
+        services.verify_icd_codes(self._codes(), klasyfikacja="ICD-11")
+        # Rachunek sprzed zmiany dawał ~34 zapytania na jeden kod ICD-11.
+        assert len(calls) < 30, f"za dużo zapytań do WHO: {len(calls)}"
+
+    def test_repeated_diagnosis_does_not_ask_twice(self, who_endpoint):
+        """To samo rozpoznanie w kolejnej wizycie ma iść z cache, nie do rejestru.
+
+        Rejestr musi tu DZIAŁAĆ. Przy pełnej awarii świadomie nie zapamiętujemy
+        wyniku — „WHO nie odpowiada" ma być stanem chwilowym, a nie czymś, co
+        zostaje w pamięci procesu do końca dnia.
+        """
+        calls = who_endpoint(
+            {
+                icd.ICD11_LINEARIZATION: {"releaseId": "2025-01"},
+                "release/11/2025-01/mms/codeinfo/6A70.1": {
+                    "stemId": "http://id.who.int/icd/release/11/2025-01/mms/111"
+                },
+                "release/11/2025-01/mms/codeinfo/7A00": {
+                    "stemId": "http://id.who.int/icd/release/11/2025-01/mms/222"
+                },
+                "release/11/2025-01/mms/111": {
+                    "code": "6A70.1",
+                    "title": "Moderate depressive episode",
+                },
+                "release/11/2025-01/mms/222": {"code": "7A00", "title": "Chronic insomnia"},
+            }
+        )
+        first = services.verify_icd_codes(self._codes(), klasyfikacja="ICD-11")
+        assert all(r.weryfikacja is services.StanWeryfikacji.POTWIERDZONY for r in first)
+        after_first = len(calls)
+        assert after_first > 0
+
+        second = services.verify_icd_codes(self._codes(), klasyfikacja="ICD-11")
+        assert len(calls) == after_first, "druga notatka odpytała rejestr od nowa"
+        assert [r.code for r in second] == [r.code for r in first]
+
+    def test_registry_outage_is_retried_on_the_next_note(self, who_endpoint):
+        """Awaria nie może zostać zapamiętana — inaczej rejestr nie wróciłby po naprawie."""
+        calls = who_endpoint({})
+        services.verify_icd_codes(self._codes(), klasyfikacja="ICD-11")
+        after_first = len(calls)
+        services.verify_icd_codes(self._codes(), klasyfikacja="ICD-11")
+        assert len(calls) > after_first
+
+    def test_exhausted_budget_stops_asking(self, who_endpoint):
+        """Po wyczerpaniu budżetu przestajemy pytać, a kody wracają niesprawdzone."""
+        calls = who_endpoint({})
+        expired = icd.Deadline(0)
+        with pytest.raises(icd.BudgetExhausted):
+            icd.search("cokolwiek", language="en", deadline=expired, trace=[])
+        assert calls == [], "mimo wyczerpanego budżetu poszło zapytanie"
+
+    def test_budget_marks_rest_as_unchecked_not_missing(self, monkeypatch):
+        """„Nie zdążyliśmy sprawdzić" to co innego niż „rejestr tego nie zna"."""
+
+        def boom(*a, **k):
+            raise icd.BudgetExhausted("budżet")
+
+        monkeypatch.setattr(icd, "lookup_code", boom)
+        monkeypatch.setattr(icd, "search", boom)
+        icd.clear_cache()
+        result = services.verify_icd_codes(self._codes(), klasyfikacja="ICD-11")
+        assert all(r.weryfikacja is services.StanWeryfikacji.NIESPRAWDZANY for r in result)
+        assert all("zbyt wolno" in r.uwaga for r in result)
+        # Kod od modelu zostaje — notatka ma być użyteczna mimo braku potwierdzenia.
+        assert [r.code for r in result] == ["6A70.1", "7A00"]
+
+    def test_note_is_produced_even_with_no_registry_at_all(self, monkeypatch):
+        """Test naczelny: rejestr zdjęty ze ścieżki krytycznej."""
+
+        def down(*a, **k):
+            raise icd.IcdUnavailable("brak sieci")
+
+        monkeypatch.setattr(icd, "lookup_code", down)
+        monkeypatch.setattr(icd, "search", down)
+        icd.clear_cache()
+        result = services.verify_icd_codes(self._codes(), klasyfikacja="ICD-11")
+        assert len(result) == 2

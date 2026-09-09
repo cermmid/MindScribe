@@ -11,6 +11,7 @@ Reguły biznesowe zakodowane w tym pliku:
 - przy odczycie wygrywa wersja poprawiona przez lekarza, a oryginał AI jest fallbackiem.
 """
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -162,6 +163,72 @@ def count_distinct_diagnoses(codes: Iterable[Mapping[str, Any]] | Iterable[Any])
     return len(names)
 
 
+def _verification_key(code: Any) -> tuple[str, str, str]:
+    """Co czyni wiersz „tym samym rozpoznaniem" z punktu widzenia rejestru.
+
+    Wyłącznie klasyfikacja, kod i nazwa. Zaznaczenie „Główne" albo zmiana pewności
+    nie zmieniają niczego, o co pytalibyśmy WHO, więc nie mogą kasować weryfikacji.
+    """
+    get = code.get if isinstance(code, Mapping) else lambda k, d=None: getattr(code, k, d)
+    return (
+        _normalize_klasyfikacja(get("klasyfikacja")),
+        str(get("code") or "").strip().upper(),
+        str(get("description") or "").strip().lower(),
+    )
+
+
+def reuse_verification(
+    rows: Iterable[ICDCode],
+    already_verified: Iterable[Mapping[str, Any]] | None,
+) -> tuple[list[VerifiedICDCode], list[ICDCode]]:
+    """Rozdziel wiersze na te z gotowym wynikiem i te do sprawdzenia w rejestrze.
+
+    Przy zatwierdzaniu weryfikowaliśmy **wszystko** od nowa — także wiersze, których
+    specjalista nie tknął, a które kilka minut wcześniej zostały sprawdzone. To był
+    drugi pełny przebieg po rejestrze WHO na jedną wizytę, płacony czasem czekania.
+
+    Wiersz zmieniony ręcznie nadal idzie do rejestru — reguła, że wpisany z palca kod
+    przechodzi weryfikację, zostaje nienaruszona.
+    """
+    known: dict[tuple[str, str, str], Mapping[str, Any]] = {}
+    for entry in already_verified or []:
+        known.setdefault(_verification_key(entry), entry)
+
+    reused: list[VerifiedICDCode] = []
+    to_check: list[ICDCode] = []
+    for row in rows:
+        previous = known.get(_verification_key(row))
+        if previous is None:
+            to_check.append(row)
+            continue
+        # Pola weryfikacyjne bierzemy ze starego wyniku, edytowalne z bieżącego
+        # wiersza — inaczej odznaczenie „Główne" cofałoby się przy zapisie.
+        reused.append(
+            VerifiedICDCode(
+                klasyfikacja=_normalize_klasyfikacja(row.klasyfikacja),
+                code=(row.code or "").strip(),
+                description=(row.description or "").strip(),
+                termin_wyszukiwania=(row.termin_wyszukiwania or "").strip(),
+                rozpoznanie_glowne=row.rozpoznanie_glowne,
+                confidence=row.confidence,
+                oficjalna_nazwa=str(previous.get("oficjalna_nazwa") or ""),
+                weryfikacja=StanWeryfikacji(
+                    str(
+                        getattr(
+                            previous.get("weryfikacja"),
+                            "value",
+                            previous.get("weryfikacja") or "NIESPRAWDZANY",
+                        )
+                    )
+                ),
+                zweryfikowany=bool(previous.get("zweryfikowany")),
+                propozycja_ai=str(previous.get("propozycja_ai") or ""),
+                uwaga=str(previous.get("uwaga") or ""),
+            )
+        )
+    return reused, to_check
+
+
 def registry_is_configured() -> bool:
     """Czy w konfiguracji są poświadczenia do rejestru WHO.
 
@@ -211,7 +278,10 @@ def verify_icd_codes(
     pomocniczą w ICD-10 i zapisujemy jej wynik w uwadze — to wskazówka, nie potwierdzenie.
 
     Awaria API nigdy nie przerywa pracy: wszystko wraca jako niezweryfikowane
-    z czytelną uwagą, a lekarz decyduje.
+    z czytelną uwagą, a lekarz decyduje. Tak samo działa **budżet czasu**: rejestr
+    dostaje ograniczoną liczbę sekund na całą notatkę i po ich przekroczeniu reszta
+    kodów wraca niesprawdzona. Rejestr jest wartością dodaną, nie warunkiem powstania
+    notatki — bez tego ograniczenia awaria WHO stawała się awarią gabinetu.
     """
     from . import icd
     from .config import VERIFY_ICD10
@@ -219,6 +289,11 @@ def verify_icd_codes(
     fallback = _normalize_klasyfikacja(klasyfikacja)
     results: list[VerifiedICDCode] = []
     api_down_note = ""
+    # Stan, jaki dostają kolejne kody po pierwszym niepowodzeniu. Rozróżnienie jest
+    # istotne: „rejestr nie odpowiada" i „nie zdążyliśmy zapytać" to nie to samo co
+    # „sprawdziliśmy i nie ma", a tylko to ostatnie znaczy NIEPOTWIERDZONY.
+    api_down_state = StanWeryfikacji.NIEPOTWIERDZONY
+    deadline = icd.Deadline()
 
     for proposal in proposals:
         if isinstance(proposal, ICDCode):
@@ -237,7 +312,7 @@ def verify_icd_codes(
         icd11 = system == "ICD-11"
 
         if system == "DSM-5":
-            results.append(_verify_dsm5(item, system, api_down_note))
+            results.append(_verify_dsm5(item, system, api_down_note, deadline))
             continue
 
         if system == "ICD-10" and not VERIFY_ICD10:
@@ -271,7 +346,7 @@ def verify_icd_codes(
             continue
 
         if api_down_note:
-            results.append(_unverified(item, api_down_note, system))
+            results.append(_unverified(item, api_down_note, system, api_down_state))
             continue
 
         trace: list[dict] = []
@@ -279,14 +354,27 @@ def verify_icd_codes(
             # Też po angielsku: `oficjalna_nazwa` i porównanie rozjazdu niżej mają
             # sens tylko wtedy, gdy obie strony są w tym samym języku.
             match = (
-                icd.lookup_code(proposed_code, icd11=icd11, language="en")
+                icd.lookup_code(proposed_code, icd11=icd11, language="en", deadline=deadline)
                 if proposed_code
                 else None
             )
             searched = None
             if match is None and search_term:
-                candidates = icd.search(search_term, icd11=icd11, language="en", trace=trace)
+                candidates = icd.search(
+                    search_term, icd11=icd11, language="en", trace=trace, deadline=deadline
+                )
                 searched = candidates[0] if candidates else None
+        except icd.BudgetExhausted:
+            # Nie jest to awaria rejestru, tylko nasza decyzja, żeby przestać czekać.
+            # Komunikat musi to rozróżniać: kod jest do sprawdzenia, ale nie dlatego,
+            # że WHO go nie zna.
+            api_down_note = (
+                "Rejestr WHO odpowiadał zbyt wolno — przerwaliśmy sprawdzanie, żeby nie "
+                "opóźniać notatki. Kod NIE został zweryfikowany."
+            )
+            api_down_state = StanWeryfikacji.NIESPRAWDZANY
+            results.append(_unverified(item, api_down_note, system, api_down_state))
+            continue
         except icd.IcdUnavailable as exc:
             api_down_note = (
                 "Nie udało się połączyć z rejestrem WHO — kod NIE został zweryfikowany. "
@@ -363,7 +451,9 @@ def verify_icd_codes(
     return normalize_principal_diagnosis(sort_codes_by_classification(results))
 
 
-def _verify_dsm5(item: ICDCode, system: str, api_down_note: str) -> VerifiedICDCode:
+def _verify_dsm5(
+    item: ICDCode, system: str, api_down_note: str, deadline: Any = None
+) -> VerifiedICDCode:
     """DSM-5 zawsze wraca jako niezweryfikowany — nie ma publicznego rejestru do sprawdzenia.
 
     DSM-5 posługuje się kodami ICD-10-CM, więc gdy model podał kod, robimy pomocniczą
@@ -376,8 +466,9 @@ def _verify_dsm5(item: ICDCode, system: str, api_down_note: str) -> VerifiedICDC
     code = (item.code or "").strip()
     if code and not api_down_note:
         try:
-            crosscheck = icd.lookup_code(code, icd11=False)
-        except icd.IcdUnavailable:
+            crosscheck = icd.lookup_code(code, icd11=False, deadline=deadline)
+        except (icd.IcdUnavailable, icd.BudgetExhausted):
+            # Kontrola pomocnicza — jej brak nic nie psuje, więc nie warto na nią czekać.
             crosscheck = None
         if crosscheck is not None:
             note = f"{DSM5_NOTE} Kontrolnie: {code} w ICD-10 to „{crosscheck.title}”."
@@ -413,12 +504,33 @@ def _differs(a: str, b: str) -> bool:
 
 
 @dataclass
+class Timings:
+    """Ile zajął każdy etap generowania, w sekundach.
+
+    Rozbicie, nie jedna liczba: „ponad pięć minut" nie mówi, czy winien jest model,
+    rejestr WHO, czy zapis audio — a każda z tych rzeczy naprawia się inaczej.
+    """
+
+    zapis_audio: float = 0.0
+    model: float = 0.0
+    rejestr_who: float = 0.0
+    calosc: float = 0.0
+
+    def summary(self) -> str:
+        return (
+            f"model {self.model:.0f} s · rejestr WHO {self.rejestr_who:.0f} s · "
+            f"zapis {self.zapis_audio:.0f} s"
+        )
+
+
+@dataclass
 class CreatedVisit:
     visit_id: int
     note: PsychiatricNote
     debug_prompt: str
     usage: dict[str, Any] = field(default_factory=dict)
     few_shot_count: int = 0
+    timings: "Timings" = field(default_factory=lambda: Timings())
 
 
 def load_few_shot_examples(doctor_id: str) -> list[dict[str, str]]:
@@ -462,16 +574,31 @@ def create_visit_from_audio(
     wanted = [klasyfikacje] if isinstance(klasyfikacje, str) else list(klasyfikacje)
     wanted = wanted or ["ICD-10"]
 
+    # Mierzymy etapy osobno. Bez tego „notatka powstaje ponad pięć minut" to zdanie,
+    # z którym nie da się nic zrobić — nie wiadomo, czy winien jest model, rejestr WHO,
+    # czy zapis. Liczby lądują w bazie i w panelu właściciela.
+    started = time.monotonic()
     audio_path: Path = save_uploaded_audio(audio_bytes, suffix=audio_suffix)
+    after_save = time.monotonic()
+
     draft, debug_prompt, usage = generate_note_from_audio(
         audio_path, few_shot, mime_type=audio_mime, klasyfikacje=wanted
     )
+    after_model = time.monotonic()
 
     # Kody od modelu są tylko propozycją — do notatki trafiają dopiero po sprawdzeniu w WHO.
     note = PsychiatricNote(
         **draft.model_dump(exclude={"kody_icd", "klasyfikacje"}),
         klasyfikacje=[Klasyfikacja(k) for k in wanted],
         kody_icd=verify_icd_codes(draft.kody_icd, klasyfikacja=wanted[0]),
+    )
+    after_registry = time.monotonic()
+
+    timings = Timings(
+        zapis_audio=after_save - started,
+        model=after_model - after_save,
+        rejestr_who=after_registry - after_model,
+        calosc=after_registry - started,
     )
 
     visit_id = insert_visit(
@@ -484,6 +611,7 @@ def create_visit_from_audio(
         doctor_id=doctor_id,
         doctor_name=doctor_name,
         usage=usage,
+        generation_seconds=round(timings.calosc, 2),
     )
     return CreatedVisit(
         visit_id=visit_id,
@@ -491,6 +619,7 @@ def create_visit_from_audio(
         debug_prompt=debug_prompt,
         usage=usage,
         few_shot_count=len(few_shot),
+        timings=timings,
     )
 
 
@@ -513,6 +642,7 @@ def build_corrected_note(
     klasyfikacje: list[str] | str = "ICD-10",
     jakosc_nagrania: str = "DOBRA",
     verify: bool = True,
+    already_verified: Iterable[Mapping[str, Any]] | None = None,
 ) -> PsychiatricNote:
     """Zbuduj i zwaliduj poprawioną notatkę. Rzuca `ValidationError`, gdy dane są złe.
 
@@ -528,11 +658,17 @@ def build_corrected_note(
         if icd_list and isinstance(icd_list[0], ICDCode)
         else clean_icd_rows(icd_list, default_klasyfikacja=wanted[0])  # type: ignore[arg-type]
     )
-    codes = (
-        verify_icd_codes(proposals, klasyfikacja=wanted[0])
-        if verify
-        else [_unverified(p, "Weryfikacja pominięta.") for p in proposals]
-    )
+    if not verify:
+        codes = [_unverified(p, "Weryfikacja pominięta.") for p in proposals]
+    else:
+        # Wiersze niezmienione od czasu generowania mają już wynik z rejestru —
+        # pytanie o nie po raz drugi to czyste czekanie.
+        reused, to_check = reuse_verification(proposals, already_verified)
+        codes = normalize_principal_diagnosis(
+            sort_codes_by_classification(
+                reused + verify_icd_codes(to_check, klasyfikacja=wanted[0])
+            )
+        )
     return PsychiatricNote(
         jakosc_nagrania=JakoscNagrania(jakosc_nagrania),
         raw_transcript=raw_transcript,
